@@ -184,6 +184,7 @@ class MasterTimelineCompositor:
         # Target export resolution
         target_width: int = 1080,
         target_height: int = 1920,
+        use_single_pass: bool = False,
     ) -> Dict[str, Any]:
         """Runs the entire modular pipeline and renders broadcast-quality final.mp4 with all artifacts."""
         out_dir = Path(output_dir) if output_dir else STORAGE_RENDERS / clip_id
@@ -458,7 +459,261 @@ class MasterTimelineCompositor:
                 with PILImage.open(str(card_overlay_path)) as c_img:
                     c_w, c_h = c_img.size
 
-        # Render Main Video Stream based on Layout Mode & Overlay
+        # Rendering Step: Support single-pass filter_complex or legacy multi-pass
+        should_use_single_pass = use_single_pass or os.getenv("SHORTIFY_RENDERER") == "single_pass"
+
+        single_pass_success = False
+        if should_use_single_pass and not (opening_audio_path or ending_audio_path):
+            try:
+                cls._render_single_pass_filter_complex(
+                    src_path=src_path,
+                    start_sec=start_sec,
+                    end_sec=end_sec,
+                    clip_duration=clip_duration,
+                    layout_mode=layout_mode,
+                    bg_video=bg_video,
+                    card_overlay_path=card_overlay_path,
+                    card_y=card_y,
+                    c_w=c_w,
+                    c_h=c_h,
+                    video_scale_percent=video_scale_percent,
+                    target_width=target_width,
+                    target_height=target_height,
+                    crop_info=crop_info,
+                    ass_path=ass_path,
+                    final_mp4_path=final_mp4_path,
+                    encoder=encoder,
+                    has_card=has_card,
+                )
+                if final_mp4_path.exists() and cls._measure_duration(str(final_mp4_path)) > 0:
+                    single_pass_success = True
+            except Exception as e:
+                print(f"[Renderer] Single-pass render failed ({e}), falling back to legacy multi-pass...")
+                if final_mp4_path.exists():
+                    try:
+                        final_mp4_path.unlink()
+                    except Exception:
+                        pass
+
+        if not single_pass_success:
+            cls._render_legacy_multipass(
+                src_path=src_path,
+                start_sec=start_sec,
+                end_sec=end_sec,
+                clip_duration=clip_duration,
+                layout_mode=layout_mode,
+                bg_video=bg_video,
+                card_overlay_path=card_overlay_path,
+                card_y=card_y,
+                c_w=c_w,
+                c_h=c_h,
+                video_scale_percent=video_scale_percent,
+                target_width=target_width,
+                target_height=target_height,
+                crop_info=crop_info,
+                ass_path=ass_path,
+                final_mp4_path=final_mp4_path,
+                composed_raw_path=composed_raw_path,
+                main_clip_raw=main_clip_raw,
+                out_dir=out_dir,
+                encoder=encoder,
+                opening_audio_path=opening_audio_path,
+                opening_audio_dur=opening_audio_dur,
+                ending_audio_path=ending_audio_path,
+                ending_audio_dur=ending_audio_dur,
+                has_card=has_card,
+            )
+
+        final_dur = cls._measure_duration(str(final_mp4_path))
+        total_expected_dur = round(clip_duration + opening_audio_dur + ending_audio_dur, 2)
+
+        # Step 6D: Generate comprehensive render_report.json
+        report = {
+            "clip_id": clip_id,
+            "status": "success" if final_mp4_path.exists() and final_dur > 0 else "failed",
+            "source_media": str(src_path),
+            "start_sec": start_sec,
+            "end_sec": end_sec,
+            "clip_duration_sec": clip_duration,
+            "total_duration_sec": final_dur,
+            "expected_duration_sec": total_expected_dur,
+            "video_format": {
+                "resolution": f"{target_width}x{target_height}",
+                "aspect_ratio": "9:16",
+                "codec": "h264",
+                "audio_codec": "aac",
+            },
+            "hooks": {
+                "opening_hook_enabled": bool(opening_audio_path),
+                "opening_hook_text": opening_hook_text,
+                "opening_hook_duration_sec": opening_audio_dur,
+                "headline_text": headline_text,
+                "ending_hook_enabled": bool(ending_audio_path),
+                "ending_hook_text": ending_hook_text,
+            },
+            "subtitles": {
+                "preset": subtitle_preset,
+                "word_count": len(combined_words),
+                "qa_status": qa_report.get("status", "pass"),
+                "qa_issues": qa_report.get("issues", []),
+            },
+            "packaging": packaging,
+            "output_files": {
+                "final_video": str(final_mp4_path.resolve()),
+                "transcript": str((out_dir / "transcript.json").resolve()),
+                "word_alignment": str((out_dir / "word_alignment.json").resolve()),
+                "hooks": str((out_dir / "hooks.json").resolve()),
+                "opening_voice": str(Path(opening_audio_path).resolve()) if opening_audio_path else None,
+                "subtitles_ass": str(ass_path.resolve()),
+                "subtitle_qa_report": str((out_dir / "subtitle_qa_report.json").resolve()),
+                "packaging_metadata": str((out_dir / "packaging_metadata.json").resolve()),
+                "render_report": str((out_dir / "render_report.json").resolve()),
+            }
+        }
+
+        with open(out_dir / "render_report.json", "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2)
+
+        return report
+
+    @classmethod
+    def re_render_subtitles_fast(
+        cls,
+        clip_dir: str,
+        subtitle_preset: str = "mrbeast",
+        custom_active_color: Optional[str] = None,
+        custom_font_name: Optional[str] = None,
+        headline_text: Optional[str] = None,
+        video_width: int = 1080,
+        video_height: int = 1920,
+    ) -> Dict[str, Any]:
+        """2-second fast re-rendering: Re-burns ASS subtitles onto composed_raw.mp4 without re-running source analysis."""
+        c_dir = Path(clip_dir)
+        composed_raw = c_dir / "composed_raw.mp4"
+        final_mp4 = c_dir / "final.mp4"
+        word_align_file = c_dir / "word_alignment.json"
+
+        if not composed_raw.exists() or not word_align_file.exists():
+            return {"success": False, "error": "Clip artifacts not found"}
+
+        with open(word_align_file, "r", encoding="utf-8") as f:
+            align_data = json.load(f)
+
+        words = align_data if isinstance(align_data, list) else align_data.get("words", [])
+
+        # Check for opening hook duration to keep timing synchronized with composed_raw.mp4
+        time_offset = 0.0
+        opening_hook_words = []
+        report_file = c_dir / "render_report.json"
+        if report_file.exists():
+            try:
+                with open(report_file, "r", encoding="utf-8") as rf:
+                    rep = json.load(rf)
+                time_offset = float(rep.get("hooks", {}).get("opening_hook_duration_sec", 0.0))
+                hook_txt = rep.get("hooks", {}).get("opening_hook_text", "")
+                if not headline_text:
+                    headline_text = rep.get("hooks", {}).get("headline_text")
+                if time_offset > 0 and hook_txt:
+                    h_words = hook_txt.split()
+                    w_span = time_offset / len(h_words)
+                    for idx, w in enumerate(h_words):
+                        opening_hook_words.append({
+                            "word": w,
+                            "start": round(idx * w_span, 2),
+                            "end": round((idx + 1) * w_span, 2),
+                        })
+            except Exception:
+                pass
+
+        combined_words = []
+        if opening_hook_words:
+            combined_words.extend(opening_hook_words)
+        for w in words:
+            combined_words.append({
+                "word": w.get("word", ""),
+                "start": round(w.get("start", 0.0) + time_offset, 3),
+                "end": round(w.get("end", 0.0) + time_offset, 3),
+            })
+
+        ass_path = c_dir / "subtitles.ass"
+
+        KineticSubtitleCompiler.compile_ass(
+            words=combined_words,
+            output_path=str(ass_path),
+            headline_text=headline_text,
+            preset_name=subtitle_preset,
+            custom_active_color=custom_active_color,
+            custom_font_name=custom_font_name,
+            time_offset_sec=0.0,
+            video_width=video_width,
+            video_height=video_height,
+        )
+
+        encoder = cls._detect_encoder()
+        escaped_ass = str(ass_path.resolve()).replace("\\", "/").replace(":", "\\:")
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(composed_raw.resolve()),
+            "-vf", f"subtitles='{escaped_ass}'",
+            "-c:v", encoder,
+            "-preset", "fast",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "copy",
+            "-movflags", "+faststart",
+            str(final_mp4.resolve()),
+        ]
+        res = cls._safe_run_ffmpeg(cmd, timeout=180)
+        if res.returncode != 0:
+            cmd[cmd.index("-c:v") + 1] = "libx264"
+            cls._safe_run_ffmpeg(cmd, timeout=180)
+
+        return {
+            "success": True,
+            "final_video": str(final_mp4.resolve()),
+            "subtitles_ass": str(ass_path.resolve()),
+            "preset": subtitle_preset,
+        }
+
+    @classmethod
+    def _render_legacy_multipass(
+        cls,
+        src_path: Path,
+        start_sec: float,
+        end_sec: float,
+        clip_duration: float,
+        layout_mode: str,
+        bg_video: Optional[str],
+        card_overlay_path: Optional[Path],
+        card_y: int,
+        c_w: int,
+        c_h: int,
+        video_scale_percent: int,
+        target_width: int,
+        target_height: int,
+        crop_info: Dict[str, Any],
+        ass_path: Path,
+        final_mp4_path: Path,
+        composed_raw_path: Path,
+        main_clip_raw: Path,
+        out_dir: Path,
+        encoder: str,
+        opening_audio_path: Optional[str],
+        opening_audio_dur: float,
+        ending_audio_path: Optional[str],
+        ending_audio_dur: float,
+        has_card: bool,
+    ) -> None:
+        """Executes the battle-tested multi-pass compositing pipeline (production default)."""
+        src_w = crop_info.get("source_width", 1920)
+        src_h = crop_info.get("source_height", 1080)
+        crop_w = crop_info.get("crop_width", int(src_h * 9 / 16))
+        crop_h = crop_info.get("crop_height", src_h)
+        crop_x = crop_info.get("optimal_crop_x", (src_w - crop_w) // 2)
+        crop_expr = crop_info.get("crop_expr", str(crop_x))
+        has_motion = crop_info.get("has_motion", False)
+
+# Render Main Video Stream based on Layout Mode & Overlay
         is_split = layout_mode in ["split_screen", "split_screen_comment", "split_50_50", "split_60_40", "stacked"] and bg_video and Path(bg_video).exists()
         is_ambient = layout_mode in ["fit_ambient_blur", "blurred_bg", "floating", "card", "card_frame", "blurred"]
 
@@ -840,156 +1095,299 @@ class MasterTimelineCompositor:
             cls._safe_run_ffmpeg(burn_cmd, timeout=180)
 
         # Verify export integrity
-        final_dur = cls._measure_duration(str(final_mp4_path))
-        total_expected_dur = round(clip_duration + opening_audio_dur + ending_audio_dur, 2)
-
-        # Step 6D: Generate comprehensive render_report.json
-        report = {
-            "clip_id": clip_id,
-            "status": "success" if final_mp4_path.exists() and final_dur > 0 else "failed",
-            "source_media": str(src_path),
-            "start_sec": start_sec,
-            "end_sec": end_sec,
-            "clip_duration_sec": clip_duration,
-            "total_duration_sec": final_dur,
-            "expected_duration_sec": total_expected_dur,
-            "video_format": {
-                "resolution": f"{target_width}x{target_height}",
-                "aspect_ratio": "9:16",
-                "codec": "h264",
-                "audio_codec": "aac",
-            },
-            "hooks": {
-                "opening_hook_enabled": bool(opening_audio_path),
-                "opening_hook_text": opening_hook_text,
-                "opening_hook_duration_sec": opening_audio_dur,
-                "headline_text": headline_text,
-                "ending_hook_enabled": bool(ending_audio_path),
-                "ending_hook_text": ending_hook_text,
-            },
-            "subtitles": {
-                "preset": subtitle_preset,
-                "word_count": len(combined_words),
-                "qa_status": qa_report.get("status", "pass"),
-                "qa_issues": qa_report.get("issues", []),
-            },
-            "packaging": packaging,
-            "output_files": {
-                "final_video": str(final_mp4_path.resolve()),
-                "transcript": str((out_dir / "transcript.json").resolve()),
-                "word_alignment": str((out_dir / "word_alignment.json").resolve()),
-                "hooks": str((out_dir / "hooks.json").resolve()),
-                "opening_voice": str(Path(opening_audio_path).resolve()) if opening_audio_path else None,
-                "subtitles_ass": str(ass_path.resolve()),
-                "subtitle_qa_report": str((out_dir / "subtitle_qa_report.json").resolve()),
-                "packaging_metadata": str((out_dir / "packaging_metadata.json").resolve()),
-                "render_report": str((out_dir / "render_report.json").resolve()),
-            }
-        }
-
-        with open(out_dir / "render_report.json", "w", encoding="utf-8") as f:
-            json.dump(report, f, indent=2)
-
-        return report
 
     @classmethod
-    def re_render_subtitles_fast(
+    def _render_single_pass_filter_complex(
         cls,
-        clip_dir: str,
-        subtitle_preset: str = "mrbeast",
-        custom_active_color: Optional[str] = None,
-        custom_font_name: Optional[str] = None,
-        headline_text: Optional[str] = None,
-        video_width: int = 1080,
-        video_height: int = 1920,
-    ) -> Dict[str, Any]:
-        """2-second fast re-rendering: Re-burns ASS subtitles onto composed_raw.mp4 without re-running source analysis."""
-        c_dir = Path(clip_dir)
-        composed_raw = c_dir / "composed_raw.mp4"
-        final_mp4 = c_dir / "final.mp4"
-        word_align_file = c_dir / "word_alignment.json"
-
-        if not composed_raw.exists() or not word_align_file.exists():
-            return {"success": False, "error": "Clip artifacts not found"}
-
-        with open(word_align_file, "r", encoding="utf-8") as f:
-            align_data = json.load(f)
-
-        words = align_data if isinstance(align_data, list) else align_data.get("words", [])
-
-        # Check for opening hook duration to keep timing synchronized with composed_raw.mp4
-        time_offset = 0.0
-        opening_hook_words = []
-        report_file = c_dir / "render_report.json"
-        if report_file.exists():
-            try:
-                with open(report_file, "r", encoding="utf-8") as rf:
-                    rep = json.load(rf)
-                time_offset = float(rep.get("hooks", {}).get("opening_hook_duration_sec", 0.0))
-                hook_txt = rep.get("hooks", {}).get("opening_hook_text", "")
-                if not headline_text:
-                    headline_text = rep.get("hooks", {}).get("headline_text")
-                if time_offset > 0 and hook_txt:
-                    h_words = hook_txt.split()
-                    w_span = time_offset / len(h_words)
-                    for idx, w in enumerate(h_words):
-                        opening_hook_words.append({
-                            "word": w,
-                            "start": round(idx * w_span, 2),
-                            "end": round((idx + 1) * w_span, 2),
-                        })
-            except Exception:
-                pass
-
-        combined_words = []
-        if opening_hook_words:
-            combined_words.extend(opening_hook_words)
-        for w in words:
-            combined_words.append({
-                "word": w.get("word", ""),
-                "start": round(w.get("start", 0.0) + time_offset, 3),
-                "end": round(w.get("end", 0.0) + time_offset, 3),
-            })
-
-        ass_path = c_dir / "subtitles.ass"
-
-        KineticSubtitleCompiler.compile_ass(
-            words=combined_words,
-            output_path=str(ass_path),
-            headline_text=headline_text,
-            preset_name=subtitle_preset,
-            custom_active_color=custom_active_color,
-            custom_font_name=custom_font_name,
-            time_offset_sec=0.0,
-            video_width=video_width,
-            video_height=video_height,
-        )
-
-        encoder = cls._detect_encoder()
+        src_path: Path,
+        start_sec: float,
+        end_sec: float,
+        clip_duration: float,
+        layout_mode: str,
+        bg_video: Optional[str],
+        card_overlay_path: Optional[Path],
+        card_y: int,
+        c_w: int,
+        c_h: int,
+        video_scale_percent: int,
+        target_width: int,
+        target_height: int,
+        crop_info: Dict[str, Any],
+        ass_path: Path,
+        final_mp4_path: Path,
+        encoder: str,
+        has_card: bool,
+    ) -> None:
+        """Executes a unified single-pass filter_complex pipeline combining layout, overlay, and subtitles directly to final.mp4."""
         escaped_ass = str(ass_path.resolve()).replace("\\", "/").replace(":", "\\:")
 
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", str(composed_raw.resolve()),
-            "-vf", f"subtitles='{escaped_ass}'",
-            "-c:v", encoder,
-            "-preset", "fast",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "copy",
-            "-movflags", "+faststart",
-            str(final_mp4.resolve()),
-        ]
+        src_w = crop_info.get("source_width", 1920)
+        src_h = crop_info.get("source_height", 1080)
+        crop_w = crop_info.get("crop_width", int(src_h * 9 / 16))
+        crop_h = crop_info.get("crop_height", src_h)
+        crop_x = crop_info.get("optimal_crop_x", (src_w - crop_w) // 2)
+        crop_expr = crop_info.get("crop_expr", str(crop_x))
+        has_motion = crop_info.get("has_motion", False)
+
+        is_split = layout_mode in ["split_screen", "split_screen_comment", "split_50_50", "split_60_40", "stacked"] and bg_video and Path(bg_video).exists()
+        is_ambient = layout_mode in ["fit_ambient_blur", "blurred_bg", "floating", "card", "card_frame", "blurred"]
+
+        if is_split:
+            scale_pct = max(30, min(80, video_scale_percent))
+            top_h = int(target_height * (scale_pct / 100))
+            if top_h % 2 != 0:
+                top_h += 1
+            bot_h = target_height - top_h
+
+            top_aspect = target_width / top_h
+            if src_w / max(1, src_h) > top_aspect:
+                spk_cw = int(src_h * top_aspect)
+                spk_ch = src_h
+                offset_x = (crop_w - spk_cw) // 2
+                if has_motion and crop_expr != str(crop_x):
+                    spk_cx = f"max(0,min({src_w - spk_cw},{crop_expr}+{offset_x}))"
+                else:
+                    spk_cx = str(max(0, min(src_w - spk_cw, crop_x + offset_x)))
+                spk_cy = 0
+            else:
+                spk_cw = src_w
+                spk_ch = int(src_w / top_aspect)
+                spk_cx = "0"
+                spk_cy = (src_h - spk_ch) // 2
+
+            spk_cw = (spk_cw // 2) * 2
+            spk_ch = (spk_ch // 2) * 2
+
+            if has_card and card_overlay_path and card_overlay_path.exists():
+                split_filter = (
+                    f"[0:v]crop=w={spk_cw}:h={spk_ch}:x='{spk_cx}':y={spk_cy},scale={target_width}:{top_h}[top]; "
+                    rf"[1:v]crop=w=min(iw\,ih*{target_width}/{bot_h}):h=min(ih\,iw*{bot_h}/{target_width}):x=(iw-ow)/2:y=(ih-oh)/2,scale={target_width}:{bot_h}[bot]; "
+                    f"[top][bot]vstack=inputs=2[stacked]; "
+                    f"[2:v]scale={c_w}:{c_h}[card]; "
+                    f"[stacked][card]overlay=(W-w)/2:{card_y},subtitles='{escaped_ass}'[v]"
+                )
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-ss", f"{start_sec:.3f}",
+                    "-i", str(src_path),
+                    "-stream_loop", "-1",
+                    "-i", str(Path(bg_video).resolve()),
+                    "-i", str(card_overlay_path.resolve()),
+                    "-filter_complex", split_filter,
+                    "-map", "[v]",
+                    "-map", "0:a:0",
+                    "-t", f"{clip_duration:.3f}",
+                    "-shortest",
+                    "-r", "30",
+                    "-c:v", encoder,
+                    "-preset", "fast",
+                    "-pix_fmt", "yuv420p",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-ar", "48000",
+                    "-ac", "2",
+                    "-movflags", "+faststart",
+                    str(final_mp4_path.resolve()),
+                ]
+            else:
+                split_filter = (
+                    f"[0:v]crop=w={spk_cw}:h={spk_ch}:x='{spk_cx}':y={spk_cy},scale={target_width}:{top_h}[top]; "
+                    rf"[1:v]crop=w=min(iw\,ih*{target_width}/{bot_h}):h=min(ih\,iw*{bot_h}/{target_width}):x=(iw-ow)/2:y=(ih-oh)/2,scale={target_width}:{bot_h}[bot]; "
+                    f"[top][bot]vstack=inputs=2,subtitles='{escaped_ass}'[v]"
+                )
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-ss", f"{start_sec:.3f}",
+                    "-i", str(src_path),
+                    "-stream_loop", "-1",
+                    "-i", str(Path(bg_video).resolve()),
+                    "-filter_complex", split_filter,
+                    "-map", "[v]",
+                    "-map", "0:a:0",
+                    "-t", f"{clip_duration:.3f}",
+                    "-shortest",
+                    "-r", "30",
+                    "-c:v", encoder,
+                    "-preset", "fast",
+                    "-pix_fmt", "yuv420p",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-ar", "48000",
+                    "-ac", "2",
+                    "-movflags", "+faststart",
+                    str(final_mp4_path.resolve()),
+                ]
+        elif is_ambient:
+            card_w = int(target_width * 0.92)
+            card_h = int(card_w * (src_h / max(1, src_w)))
+            if card_h % 2 != 0:
+                card_h += 1
+            vid_y = int((target_height * 0.70 - card_h) / 2 + target_height * 0.12)
+            has_gameplay_bg = bool(bg_video and Path(bg_video).exists())
+
+            if has_gameplay_bg:
+                if has_card and card_overlay_path and card_overlay_path.exists():
+                    ambient_filter = (
+                        f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=increase,crop={target_width}:{target_height},boxblur=25:5,eq=brightness=-0.15:contrast=1.05[bg]; "
+                        f"[0:v]scale={card_w}:{card_h}[fg]; "
+                        f"[2:v]scale={c_w}:{c_h}[card]; "
+                        f"[bg][fg]overlay=(W-w)/2:{vid_y}[base]; "
+                        f"[base][card]overlay=(W-w)/2:{card_y},subtitles='{escaped_ass}'[v]"
+                    )
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-ss", f"{start_sec:.3f}",
+                        "-i", str(src_path),
+                        "-stream_loop", "-1",
+                        "-i", str(Path(bg_video).resolve()),
+                        "-i", str(card_overlay_path.resolve()),
+                        "-t", f"{clip_duration:.3f}",
+                        "-filter_complex", ambient_filter,
+                        "-map", "[v]",
+                        "-map", "0:a:0",
+                        "-r", "30",
+                        "-c:v", encoder,
+                        "-preset", "fast",
+                        "-pix_fmt", "yuv420p",
+                        "-c:a", "aac",
+                        "-b:a", "192k",
+                        "-ar", "48000",
+                        "-ac", "2",
+                        "-movflags", "+faststart",
+                        str(final_mp4_path.resolve()),
+                    ]
+                else:
+                    ambient_filter = (
+                        f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=increase,crop={target_width}:{target_height},boxblur=25:5,eq=brightness=-0.15:contrast=1.05[bg]; "
+                        f"[0:v]scale={card_w}:{card_h}[fg]; "
+                        f"[bg][fg]overlay=(W-w)/2:{vid_y},subtitles='{escaped_ass}'[v]"
+                    )
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-ss", f"{start_sec:.3f}",
+                        "-i", str(src_path),
+                        "-stream_loop", "-1",
+                        "-i", str(Path(bg_video).resolve()),
+                        "-t", f"{clip_duration:.3f}",
+                        "-filter_complex", ambient_filter,
+                        "-map", "[v]",
+                        "-map", "0:a:0",
+                        "-r", "30",
+                        "-c:v", encoder,
+                        "-preset", "fast",
+                        "-pix_fmt", "yuv420p",
+                        "-c:a", "aac",
+                        "-b:a", "192k",
+                        "-ar", "48000",
+                        "-ac", "2",
+                        "-movflags", "+faststart",
+                        str(final_mp4_path.resolve()),
+                    ]
+            else:
+                if has_card and card_overlay_path and card_overlay_path.exists():
+                    ambient_filter = (
+                        f"[0:v]scale={target_width}:{target_height}:force_original_aspect_ratio=increase,crop={target_width}:{target_height},boxblur=25:5,eq=brightness=-0.15:contrast=1.05[bg]; "
+                        f"[0:v]scale={card_w}:{card_h}[fg]; "
+                        f"[1:v]scale={c_w}:{c_h}[card]; "
+                        f"[bg][fg]overlay=(W-w)/2:{vid_y}[base]; "
+                        f"[base][card]overlay=(W-w)/2:{card_y},subtitles='{escaped_ass}'[v]"
+                    )
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-ss", f"{start_sec:.3f}",
+                        "-i", str(src_path),
+                        "-i", str(card_overlay_path.resolve()),
+                        "-t", f"{clip_duration:.3f}",
+                        "-filter_complex", ambient_filter,
+                        "-map", "[v]",
+                        "-map", "0:a:0",
+                        "-r", "30",
+                        "-c:v", encoder,
+                        "-preset", "fast",
+                        "-pix_fmt", "yuv420p",
+                        "-c:a", "aac",
+                        "-b:a", "192k",
+                        "-ar", "48000",
+                        "-ac", "2",
+                        "-movflags", "+faststart",
+                        str(final_mp4_path.resolve()),
+                    ]
+                else:
+                    ambient_filter = (
+                        f"[0:v]scale={target_width}:{target_height}:force_original_aspect_ratio=increase,crop={target_width}:{target_height},boxblur=25:5,eq=brightness=-0.15:contrast=1.05[bg]; "
+                        f"[0:v]scale={card_w}:{card_h}[fg]; "
+                        f"[bg][fg]overlay=(W-w)/2:{vid_y},subtitles='{escaped_ass}'[v]"
+                    )
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-ss", f"{start_sec:.3f}",
+                        "-i", str(src_path),
+                        "-t", f"{clip_duration:.3f}",
+                        "-filter_complex", ambient_filter,
+                        "-map", "[v]",
+                        "-map", "0:a:0",
+                        "-r", "30",
+                        "-c:v", encoder,
+                        "-preset", "fast",
+                        "-pix_fmt", "yuv420p",
+                        "-c:a", "aac",
+                        "-b:a", "192k",
+                        "-ar", "48000",
+                        "-ac", "2",
+                        "-movflags", "+faststart",
+                        str(final_mp4_path.resolve()),
+                    ]
+        else:
+            full_crop_x = f"'{crop_expr}'" if (has_motion and crop_expr != str(crop_x)) else str(crop_x)
+            if has_card and card_overlay_path and card_overlay_path.exists():
+                full_card_filter = (
+                    f"[0:v]crop=w={crop_w}:h={crop_h}:x={full_crop_x}:y=0,scale={target_width}:{target_height}[vid]; "
+                    f"[1:v]scale={c_w}:{c_h}[card]; "
+                    f"[vid][card]overlay=(W-w)/2:{card_y},subtitles='{escaped_ass}'[v]"
+                )
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-ss", f"{start_sec:.3f}",
+                    "-i", str(src_path),
+                    "-i", str(card_overlay_path.resolve()),
+                    "-t", f"{clip_duration:.3f}",
+                    "-filter_complex", full_card_filter,
+                    "-map", "[v]",
+                    "-map", "0:a:0",
+                    "-r", "30",
+                    "-c:v", encoder,
+                    "-preset", "fast",
+                    "-pix_fmt", "yuv420p",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-ar", "48000",
+                    "-ac", "2",
+                    "-movflags", "+faststart",
+                    str(final_mp4_path.resolve()),
+                ]
+            else:
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-ss", f"{start_sec:.3f}",
+                    "-i", str(src_path),
+                    "-t", f"{clip_duration:.3f}",
+                    "-vf", f"crop=w={crop_w}:h={crop_h}:x={full_crop_x}:y=0,scale={target_width}:{target_height},subtitles='{escaped_ass}'",
+                    "-r", "30",
+                    "-c:v", encoder,
+                    "-preset", "fast",
+                    "-pix_fmt", "yuv420p",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-ar", "48000",
+                    "-ac", "2",
+                    "-movflags", "+faststart",
+                    str(final_mp4_path.resolve()),
+                ]
+
         res = cls._safe_run_ffmpeg(cmd, timeout=180)
         if res.returncode != 0:
             cmd[cmd.index("-c:v") + 1] = "libx264"
             cls._safe_run_ffmpeg(cmd, timeout=180)
-
-        return {
-            "success": True,
-            "final_video": str(final_mp4.resolve()),
-            "subtitles_ass": str(ass_path.resolve()),
-            "preset": subtitle_preset,
-        }
 
     @staticmethod
     def _safe_run_ffmpeg(cmd: List[str], timeout: int = 180) -> subprocess.CompletedProcess:

@@ -108,7 +108,18 @@ class QualityAssuranceEngine:
             checks["audio_codec"] = a_stream.get("codec_name", "")
             checks["audio_channels"] = a_stream.get("channels", 0)
 
-        # 6. Overall Pass/Fail Verdict
+        # 6. Perceptual Quality Checks: Black Frame & Audio Silence Detection
+        has_black_frames = cls._detect_black_frames(str(mp4_path))
+        checks["black_frames_detected"] = has_black_frames
+        if has_black_frames:
+            issues.append("Perceptual check failed: Sustained black frames detected in rendered video.")
+
+        has_silent_audio = cls._detect_audio_silence(str(mp4_path), duration_threshold=max(2.0, actual_duration * 0.8))
+        checks["extended_silence_detected"] = has_silent_audio
+        if has_silent_audio and actual_duration > 3.0:
+            issues.append("Perceptual check failed: Extended audio silence detected in rendered video.")
+
+        # 7. Overall Pass/Fail Verdict
         passed = len(issues) == 0
         checks["overall_pass"] = passed
 
@@ -117,6 +128,41 @@ class QualityAssuranceEngine:
             "checks": checks,
             "issues": issues,
         }
+
+    @classmethod
+    def _detect_black_frames(cls, filepath: str) -> bool:
+        """Runs ffmpeg blackdetect to find sustained black frame drops."""
+        cmd = [
+            "ffmpeg", "-v", "info",
+            "-i", str(Path(filepath).resolve()),
+            "-vf", "blackdetect=d=1.0:pix_th=0.10",
+            "-f", "null", "-",
+        ]
+        try:
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
+            # If black frames were detected, blackdetect prints [blackdetect @ ...] black_start:
+            if "black_start:" in res.stderr:
+                return True
+        except Exception:
+            pass
+        return False
+
+    @classmethod
+    def _detect_audio_silence(cls, filepath: str, duration_threshold: float = 3.0) -> bool:
+        """Runs ffmpeg silencedetect to check if audio was accidentally dropped or muted."""
+        cmd = [
+            "ffmpeg", "-v", "info",
+            "-i", str(Path(filepath).resolve()),
+            "-af", f"silencedetect=noise=-40dB:d={duration_threshold:.1f}",
+            "-f", "null", "-",
+        ]
+        try:
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
+            if "silence_start:" in res.stderr:
+                return True
+        except Exception:
+            pass
+        return False
 
     @staticmethod
     def _run_ffprobe(filepath: str) -> Optional[Dict[str, Any]]:
