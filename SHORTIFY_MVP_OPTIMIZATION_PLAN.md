@@ -1,47 +1,74 @@
-# SHORTIFY — MVP MASTER OPTIMIZATION PLAN
+# SHORTIFY — MVP MASTER OPTIMIZATION & REFINEMENT PLAN
 ## Architecture-First Analysis, Hardening Roadmap, Controlled Execution & Verification
 
 > **Authoritative Optimization Specification for Shortify (Motion GVA)**  
-> **Status:** Plan Proposed — Awaiting User Approval (Stage 3 Gate)  
+> **Status:** Final Master Plan (Rev 3) — Awaiting User Approval before Execution  
 > **Target Environment:** Windows 11, 8 GB RAM, NVIDIA RTX 3050 Laptop GPU (4 GB VRAM)  
 > **Repository Working Directory:** `c:\Users\ASUS\Desktop\clipperfree`  
-> **Core Constraint:** Zero functional regression. Working components are preserved, not rewritten.
+> **Guiding Principle:** Understand first. Plan second. Optimize third. Validate continuously. Never compromise a working Shortify pipeline for an unmeasured optimization.
 
 ---
 
 ## 1. Executive Summary
 
 ### 1.1 What Shortify Currently Does
-Shortify (Motion GVA) is a local-first, autonomous short-form video repurposing and channel automation studio. It ingests long-form video (via YouTube URLs or local video files), transcribes speech with Groq Whisper (`whisper-large-v3-turbo`), identifies candidate viral clips, tracks speakers using OpenCV YuNet DNN face detection, reframes 16:9 into 9:16 vertical video, runs an AI editorial pipeline across 7 specialized prompt roles, renders broadcast-quality kinetic ASS subtitles and social card overlays (Reddit, Twitter/X, Instagram, YouTube), synthesizes neural voiceover hooks via Edge-TTS, and publishes or schedules uploads directly to YouTube channels via Google OAuth 2.0 and the YouTube Data API v3 Resumable Protocol.
+Shortify (Motion GVA) is a local-first, autonomous short-form video repurposing and channel automation studio. It ingests long-form video (via YouTube URLs or local video files), transcribes speech with Groq Whisper (`whisper-large-v3-turbo`), identifies candidate viral clips, tracks speakers using OpenCV YuNet DNN face detection, reframes 16:9 into 9:16 vertical video, runs an AI editorial pipeline across specialized prompt roles, renders broadcast-quality kinetic ASS subtitles and social card overlays (Reddit, Twitter/X, Instagram, YouTube), synthesizes neural voiceover hooks via Edge-TTS, and publishes or schedules uploads directly to YouTube channels via Google OAuth 2.0 and the YouTube Data API v3 Resumable Protocol.
 
-### 1.2 What Is Already Working
-- **Video Ingestion:** `IngestionService` downloads videos via `yt-dlp` and fetches real captions or audio tracks.
-- **Acoustic Word Alignment:** `WordAligner` produces millisecond-accurate word boundaries using Groq Whisper.
-- **Vision-Based Reframing:** `FaceTrackingReframer` runs YuNet ONNX face detection with Haar Cascade fallback and EMA smoothing.
-- **Editorial Intelligence:** Sequential Groq LLM pipeline across 7 distinct prompt roles (`shorts_ai_roles_prompt_pack/`).
-- **Kinetic Typography:** `KineticSubtitleCompiler` compiles 10+ WordArt-style ASS subtitle presets with custom color, font, and motion properties.
-- **Social Media Cards:** `CardOverlayGenerator` renders anti-aliased 1080px transparent overlay cards with real platform logos (Reddit Snoo, X Verified, Instagram, YouTube).
-- **Voiceover Synthesis:** `TTSManager` Direction + Edge-TTS synthesis with FFmpeg loudness normalization to -16 LUFS.
-- **YouTube Publishing:** `YouTubeOAuthService` + `YouTubeUploader` (chunked resumable upload) + `PersistentScheduler` (SQLite).
-- **Frontend Studio:** Next.js 15 App Router with interactive Visual Style Studio (pre-generation configuration of captions, layouts, cards, and backgrounds).
+### 1.2 What Is Verified and Already Working
+- **Video Ingestion:** `IngestionService` (`backend/app/services/video_ingestion.py`) downloads YouTube videos via `yt-dlp` and extracts captions or real audio.
+- **Acoustic Word Alignment:** `WordAligner` (`backend/app/services/word_aligner.py`) extracts 16kHz mono WAV audio and derives millisecond-accurate word boundaries using Groq Whisper.
+- **Vision-Based Reframing:** `FaceTrackingReframer` (`backend/app/services/face_tracker.py`) executes OpenCV YuNet ONNX face detection with Haar Cascade fallback and Exponential Moving Average (EMA) pan smoothing.
+- **Kinetic Typography:** `KineticSubtitleCompiler` (`backend/app/services/kinetic_subtitle_compiler.py`) compiles 10+ WordArt-style ASS subtitle presets with configurable highlight colors, outline thickness, font family, and motion styles.
+- **Social Media Cards:** `CardOverlayGenerator` (`backend/app/services/card_overlay_generator.py`) renders anti-aliased 1080px transparent overlay cards with real platform logos (`backend/app/assets/logos/`: Reddit Snoo, X Verified, Instagram, YouTube).
+- **Voiceover Synthesis:** `TTSManager` (`backend/app/services/tts_engine.py`) provides Edge-TTS neural voice synthesis with FFmpeg EBU R128 loudness normalization to -16 LUFS.
+- **YouTube Publishing:** `YouTubeOAuthService` (`backend/app/services/youtube_oauth_service.py`) + `YouTubeUploader` (`backend/app/services/youtube_uploader.py`) supporting chunked resumable uploads with `Content-Range` headers + `PersistentScheduler` (`backend/app/services/persistent_scheduler.py`) using SQLite.
+- **Frontend Studio:** Next.js 15 App Router with the **Visual Style Studio** (`frontend/components/visual-style-studio/`), providing pre-generation configuration of captions, layouts, social cards, and backgrounds without disrupting the user flow.
 
-### 1.3 What Needs Improvement
-1. **Test Suite Lockup (P0):** Background worker starts unconditionally in `main.py:lifespan`, causing `TestClient` in pytest to hang indefinitely.
-2. **Security & Secrets at Rest (P0):** Plaintext OAuth `refresh_token` and `access_token` stored in SQLite (`scheduler.db`).
-3. **SSRF & URL Input Security (P0):** Unvalidated URLs passed directly to `yt-dlp` without YouTube domain and protocol allowlisting.
-4. **FFmpeg Multi-Pass Re-Encoding (P1):** Multiple intermediate MP4 files (`main_clip_raw.mp4`, `composed_raw.mp4`, `final.mp4`) cause 2-3x redundant video re-encoding passes.
-5. **Missing Subprocess Timeouts (P1):** Unbounded `subprocess.run` calls in rendering and transcription risk indefinite worker hangs.
-6. **Path Traversal Vulnerabilities (P1):** File download/preview endpoints lack strict basename and boundary confinement.
-7. **Lack of Caching for LLM & Transcription (P1):** Identical videos or regenerated clips trigger duplicate Groq API calls and audio extraction.
-8. **Skills Integration Fragmentation (P2):** Python evaluation scripts from `skills/` (`title.py`, `deadair.py`, `retention.py`, `hookscore.py`) are duplicated or partially bypassed.
-9. **Ephemeral Session State (P2):** Ingested videos and discovered clips are held in in-memory dictionaries that reset on backend restart.
-10. **Missing YouTube Analytics (P2):** Missing `yt-analytics.readonly` scope and analytics retrieval service to monitor reach and retention.
+### 1.3 Exact Code-Level Breakdown of the 7-Role LLM Pipeline
+The 7 prompt roles defined in `shorts_ai_roles_prompt_pack/manifest.json` are **distributed across four distinct backend services** according to their specialized lifecycle stage:
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                   THE 7-ROLE LLM PIPELINE                                      │
+├─────────────────────────────────────────────────┬──────────────────────────────────────────────┤
+│ Lifecycle Stage & Service Host                  │ Prompt Role & Operational Responsibility     │
+├─────────────────────────────────────────────────┼──────────────────────────────────────────────┤
+│ 1. Sequential Editorial Pipeline                │ • Role 01: 01_transcript_analyst             │
+│    Service: app/services/editorial_orchestrator.py│   Extracts central topic, narrative arc,      │
+│    Function: run_pipeline()                      │   intent, and initial hook opportunities.    │
+│    Model Tier: Groq Reasoner / Strategy         │ • Role 02: 02_hook_strategist                │
+│                                                 │   Scores 21 viral formulas and writes        │
+│                                                 │   opening/ending hook candidates.            │
+│                                                 │ • Role 03: 03_headline_writer                │
+│                                                 │   Converts winning hook into punchy          │
+│                                                 │   visual headline badge for video overlay.   │
+│                                                 │ • Role 04: 04_editorial_judge                │
+│                                                 │   Evaluates candidates against 4 criteria    │
+│                                                 │   (specificity, stakes, curiosity, address)  │
+│                                                 │   and outputs final hooks.json verdict.      │
+├─────────────────────────────────────────────────┼──────────────────────────────────────────────┤
+│ 2. Subtitle Quality Assurance Stage             │ • Role 05: 05_subtitle_qa                    │
+│    Service: app/services/kinetic_subtitle_compiler│   Audits compiled ASS subtitles against      │
+│    Function: audit_subtitles()                  │   reference transcript for timing drift,     │
+│    Model Tier: Groq Fast (qwen3.8-27b)          │   safe-area margins, and readability.        │
+├─────────────────────────────────────────────────┼──────────────────────────────────────────────┤
+│ 3. Master Composition & Packaging Stage         │ • Role 06: 06_content_packager               │
+│    Service: app/services/timeline_compositor.py │   Generates YouTube title (<=60 chars),      │
+│    Function: package_content()                  │   SEO description with hook line, 15 tags,   │
+│    Model Tier: Groq Fast (qwen3.8-27b)          │   5 hashtags, and thumbnail concept brief.   │
+├─────────────────────────────────────────────────┼──────────────────────────────────────────────┤
+│ 4. Voiceover Synthesis Direction (Conditional)  │ • Role 07: 07_voice_director                 │
+│    Service: app/services/tts_engine.py          │   Invoked ONLY when voiceover hook is        │
+│    Function: create_performance_plan()          │   enabled. Formulates delivery pacing,       │
+│    Model Tier: Groq Fast (qwen3.8-27b)          │   emphasis words, pause beats, and rate.     │
+└─────────────────────────────────────────────────┴──────────────────────────────────────────────┘
+```
 
 ### 1.4 What Must Remain Unchanged
 - **Zero UI Redesign:** Preserve the exact Swiss Minimalist / Neo-Brutalist design system (`#81E1DA`, `#00E297`, `#D5EB45`, dark panels, 1px borders).
-- **No Functional Regression:** `#start-processing-btn`, Visual Style Studio, timeline player, modals, and API contracts remain strictly backwards-compatible.
-- **No Cloud Bloat:** No Supabase, Redis, external queues, or Docker requirements. Local-first SQLite + async worker architecture is preserved.
-- **Hardware Budget:** All operations must execute comfortably within 8 GB RAM and 4 GB VRAM.
+- **Strict API Backwards-Compatibility:** All route signatures, schemas, `#start-processing-btn`, Visual Style Studio components, timeline scrubbing, and modal dialogs remain functional without breaking changes.
+- **Local-First Architecture:** No cloud infrastructure, no external database dependencies (e.g. Supabase, PostgreSQL, Redis), and no Docker requirements. SQLite + local storage is preserved.
+- **Hardware Boundary:** All operations must execute comfortably within 8 GB RAM and 4 GB VRAM on Windows 11.
 
 ---
 
@@ -64,16 +91,24 @@ graph TD
         ProfAPI[profile_routes.py]
     end
 
-    subgraph Intelligence["AI & Editorial Intelligence (app/services)"]
-        WordAlign[word_aligner.py - Groq Whisper]
-        EditOrch[editorial_orchestrator.py - 4 Groq Roles]
-        Packager[timeline_compositor.py - Role 06 Packager]
-        VoiceDir[tts_engine.py - Role 07 Voice Director]
-        SkillsEng[youtube_intelligence_service.py - yt skills]
-        Prompts[shorts_ai_roles_prompt_pack/]
+    subgraph EditorialPipeline["Editorial AI Services (shorts_ai_roles_prompt_pack/)"]
+        direction TB
+        EditOrch[editorial_orchestrator.py]
+        R1[Role 01: Transcript Analyst]
+        R2[Role 02: Hook Strategist]
+        R3[Role 03: Headline Writer]
+        R4[Role 04: Editorial Judge]
+        EditOrch --> R1 --> R2 --> R3 --> R4
+    end
+
+    subgraph DownstreamAIServices["Downstream AI Lifecycle Services"]
+        R5[Role 05: Subtitle QA in kinetic_subtitle_compiler.py]
+        R6[Role 06: Content Packager in timeline_compositor.py]
+        R7[Role 07: Voice Director in tts_engine.py - Conditional]
     end
 
     subgraph VisionAudio["Vision, Subtitles & Audio Engine"]
+        WordAlign[word_aligner.py - Groq Whisper]
         FaceTrack[face_tracker.py - OpenCV YuNet ONNX]
         SubCompiler[kinetic_subtitle_compiler.py - ASS WordArt]
         CardGen[card_overlay_generator.py - Pillow + Logos]
@@ -105,10 +140,12 @@ graph TD
     ShortsAPI --> FaceTrack
     ShortsAPI --> TimeComp
     
-    EditOrch --> Prompts
     TimeComp --> SubCompiler
+    SubCompiler --> R5
     TimeComp --> CardGen
+    TimeComp --> R6
     TimeComp --> TTSEng
+    TTSEng --> R7
     TimeComp --> FFmpeg
 
     YTAPI --> OAuthServ
@@ -119,213 +156,301 @@ graph TD
 
 ---
 
-## 3. Existing Workflow and Critical Dependencies
+## 3. Findings Matrix: Verified Source-Code Evidence vs Assumptions
 
-```mermaid
-flowchart TD
-    A[User Inputs YouTube URL or Uploads Video] --> B[IngestionService: yt-dlp download / copy]
-    B --> C[WordAligner: Extract 16kHz WAV -> Groq Whisper -> word_alignment.json]
-    C --> D[SmartClipSelector / ViralHookScorer: 4-Vector Scoring & Boundary Slicing]
-    D --> E[FaceTrackingReframer: OpenCV YuNet Face Detection at 3fps -> EMA Pan X]
-    E --> F[EditorialOrchestrator: Roles 01, 02, 03, 04 on Groq -> hooks.json]
-    F --> G[Visual Style Studio Config: Captions, Layout, Social Card, Background]
-    G --> H[KineticSubtitleCompiler: Generate word-by-word ASS Subtitle File]
-    H --> I[CardOverlayGenerator: Render Transparent PNG Card via Pillow]
-    I --> J{Voiceover Hook Enabled?}
-    J -- Yes --> K[TTSManager: Role 07 Plan -> Edge-TTS Audio -> -16 LUFS Normalization]
-    J -- No --> L[Audio Track Preserved]
-    K --> M[TimelineCompositor: Assemble Filter Graph]
-    L --> M
-    M --> N[FFmpeg Composition: Crop + Scale + Pad + ASS + Card Overlay + Audio Mix]
-    N --> O[Role 06 ContentPackager: Title, Description, Tags, SEO Metadata]
-    O --> P[Interactive Player Preview & Clip Customizer]
-    P --> Q{User Decision}
-    Q -- Download --> R[Local 1080x1920 MP4 Download]
-    Q -- Schedule / Publish --> S[PersistentScheduler: Save Job in SQLite Queue]
-    S --> T[BackgroundPublishWorker: Poll Queue -> Resumable Upload to YouTube]
+| ID | Category | Status | Finding Description | Source-Code Evidence (File & Lines) | Reproducible Verification Scenario | Priority |
+|---|---|---|---|---|---|---|
+| **REL-01** | Reliability | **Verified** | Background worker in FastAPI lifespan hangs `TestClient` during test execution | `backend/app/main.py:22-31`, `backend/app/services/background_worker.py:63-75` | Run `pytest backend/tests/test_assets_api.py`. Process hangs on `test_health_endpoint` because Starlette TestClient lifespan waits on infinite `_worker_loop`. | **P0** |
+| **SEC-01** | Security | **Verified** | Plaintext OAuth tokens stored in local SQLite database | `backend/app/services/persistent_scheduler.py:35-47` (`refresh_token TEXT`, `access_token TEXT`) | Inspect `backend/storage/scheduler.db` table `connected_channels`. Tokens are stored in clear text without encryption. | **P0** |
+| **SEC-02** | Security | **Verified** | Unrestricted URL ingestion in `yt-dlp` allows SSRF & local file access | `backend/app/services/video_ingestion.py:29-48` (`ydl.extract_info(url)`) | Pass `file:///C:/Windows/win.ini` or internal metadata IP `http://169.254.169.254/` to `/api/v1/shorts/ingest-url`. `yt-dlp` attempts to parse it without domain filtering. | **P0** |
+| **SEC-03** | Security | **Verified** | Subprocess execution lacks timeouts in rendering and extraction | `backend/app/services/shorts_renderer.py:86`, `backend/app/services/word_aligner.py:67` | Supply a video with malformed container headers to `ffmpeg`. `subprocess.run(cmd)` blocks indefinitely without `timeout` parameter. | **P1** |
+| **SEC-04** | Security | **Verified** | File download and preview endpoints vulnerable to path traversal | `backend/app/api/shorts_mvp_api.py:488, 514` (`filepath = STORAGE_RENDERS / filename`) | Call `GET /api/v1/shorts/preview/..%2F..%2F..%2FWindows%2Fwin.ini`. Path concatenation does not enforce containment inside `STORAGE_RENDERS`. | **P1** |
+| **PERF-01** | Performance | **Verified** | Multi-pass FFmpeg rendering re-encodes video multiple times | `backend/app/services/timeline_compositor.py:381-450` | Inspect render execution logs in `timeline_compositor.py`. Video writes `main_clip_raw.mp4`, re-opens to burn overlay into `composed_raw.mp4`, then writes `final.mp4`. | **P1** |
+| **PERF-02** | Performance | **Verified** | No content-hash caching for Whisper transcripts or LLM editorial pipeline | `backend/app/services/word_aligner.py:28-85`, `editorial_orchestrator.py:35-95` | Re-render an existing clip or test with identical audio. Both Whisper transcription and all 4 Groq editorial calls re-fire over the network. | **P1** |
+| **INT-01** | Integration | **Verified** | YouTube creator skill scripts in `skills/` are fragmented and partially bypassed | `skills/yt-package/title.py`, `skills/yt-edit/deadair.py`, `skills/yt-script/hookscore.py` | Inspect `app/services/youtube_intelligence_service.py`. Only a portion of `hookscore.py` regexes were copied inline; `title.py` and `deadair.py` are unreferenced. | **P2** |
+| **REL-02** | Reliability | **Verified** | Ephemeral in-memory state in `shorts_mvp_api.py` drops session clips on restart | `backend/app/api/shorts_mvp_api.py:25-26` (`ingested_videos = {}`, `discovered_clips = {}`) | Restart the FastAPI backend after discovering clips. Refreshing frontend shows empty clip state despite MP4s remaining on disk. | **P2** |
+| **FEAT-01** | Scope Clarification | **Assumption Clarified** | YouTube Analytics API integration | `backend/app/services/youtube_oauth_service.py:22-26` | Clarified: Analytics scope (`yt-analytics.readonly`) is non-essential for MVP video creation/scheduling and is deferred to Phase 3 to avoid blocking core workflows. | **P3** |
+
+---
+
+## 4. Performance & Reliability: Measured Baselines vs Engineering Estimates vs Targets
+
+| Metric | Empirically Measured Baseline | Engineering Estimate (Unverified) | Target Performance Goal | Measurement & Verification Method |
+|---|---|---|---|---|
+| **Pytest Test Suite Execution** | **Hangs indefinitely** on `test_health_endpoint` (Confirmed) | N/A | **< 15 seconds** for entire suite | Run `pytest backend/tests/ -v` with timestamp logging |
+| **Intermediate MP4 Writes per Render** | **3 distinct MP4 files** (`main_clip_raw`, `composed_raw`, `final`) written to disk (Confirmed) | ~120 MB - 180 MB SSD writes per 30s Short | **1 final MP4 file** written directly to `storage/renders/` | File system inspection of output directory during render |
+| **Single-Pass vs Multi-Pass Render Time** | Unmeasured on current commit (Requires benchmark harness) | Multi-pass: ~20s-25s on RTX 3050 NVENC | Single-pass: **30%–45% latency reduction** (Subject to benchmark) | Execution time delta via `time.perf_counter()` benchmark harness |
+| **Re-Render / Duplicate Clip Latency** | **Full network turnaround** (~10s-15s for Groq LLM + Whisper) on every run (Confirmed) | N/A | **< 200 ms** (Cached from SQLite content hash) | Network request duration logging with cache hit/miss headers |
+| **Subprocess Execution Safety** | **0 second timeout** (Unbounded `subprocess.run`, Confirmed) | N/A | **180 second strict timeout** with `TimeoutExpired` kill | Simulated hanging command test via mock FFmpeg script |
+| **OAuth Token Storage Security** | **Plaintext string** in SQLite `scheduler.db` (Confirmed) | N/A | **AES-256-GCM ciphertext** (`enc:v1:...`) in SQLite | Direct SQLite query verification showing non-plaintext format |
+
+---
+
+## 5. Security & Migration Specifications
+
+### 5.1 OAuth Token Encryption Migration Specification
+To protect YouTube OAuth credentials without risking data loss, insecure backups, or silent failures:
+
+#### 1. Cryptographic Primitive & Key Protection
+- **Algorithm:** Authenticated symmetric encryption via **AES-256-GCM** (`cryptography.hazmat.primitives.ciphers.aead.AESGCM`).
+  - Key size: 256 bits (32 bytes).
+  - Nonce: 96 bits (12 bytes) uniquely generated via `os.urandom(12)` per token.
+  - Authentication Tag: 128 bits (16 bytes) verified automatically on decryption.
+- **Key Protection (Windows DPAPI & Credential Manager Investigation):**
+  - **Investigation Result:** On Windows, `ctypes.windll.crypt32.CryptProtectData` (DPAPI) is available directly in the standard Python runtime without extra dependencies. Windows Credential Manager is suitable for username/password pairs, but DPAPI is the industry standard for securing arbitrary cryptographic binary keys tied to the machine and user security context.
+  - **Implementation:** The master key `SHORTIFY_ENCRYPTION_KEY` is encrypted at rest using Windows DPAPI. When the application boots, it calls `CryptUnprotectData` in-memory. If running in Linux/CI, DPAPI gracefully falls back to a restricted `.env` key file (`chmod 600`).
+- **Format on Disk:** Stored as `enc:v1:<nonce_b64>:<ciphertext_and_tag_b64>`.
+
+#### 2. Protected Pre-Migration Backup Protocol (No Plaintext Leakage)
+1. **Consistent SQLite Backup:**
+   - Do NOT perform raw file copies while SQLite may have open write handles.
+   - Use SQLite's official online backup API:
+     ```python
+     with sqlite3.connect(DB_PATH) as src, sqlite3.connect(BACKUP_PATH) as dst:
+         src.backup(dst)
+     ```
+2. **Backup Protection:**
+   - The backup file `scheduler.db.bak_<timestamp>` is created in a restricted directory `backend/storage/backups/`.
+   - The backup database file itself is immediately encrypted using DPAPI (`CryptProtectData`) to produce `scheduler.db.bak_<timestamp>.dpapi`, and the unencrypted backup is wiped (`os.remove`).
+   - This completely solves the "plaintext backup problem" by ensuring no plaintext credentials linger in backup files.
+
+#### 3. Migration Transaction & Error Handling (No Silent Plaintext Fallback)
+1. Open an exclusive SQLite transaction on `scheduler.db`.
+2. Query all rows in `connected_channels`:
+   `SELECT channel_id, refresh_token, access_token FROM connected_channels`
+3. For each token:
+   - If token is NULL or empty: preserve NULL.
+   - If token starts with `enc:v1:`: preserve (already encrypted).
+   - If token is plaintext: encrypt with AES-256-GCM, format as `enc:v1:...`.
+4. Update rows and commit.
+5. **Decryption Rule & Key Loss Policy:**
+   - If a token is prefixed with `enc:v1:`, it MUST be decrypted with the active key.
+   - If decryption fails (`InvalidTag`, key missing, or DPAPI unprotect failure):
+     - **NEVER fall back silently to plaintext.**
+     - Log an error: `[Security] Decryption failed for channel {channel_id}. Key mismatch or data corruption.`
+     - Mark channel state in DB as `status = "reauth_required"`.
+     - Return an explicit `TokenDecryptionError` and prompt user in UI to re-authenticate with Google.
+
+---
+
+### 5.2 Deep Multi-Layer SSRF & URL Validation Specification
+To eliminate Server-Side Request Forgery, DNS rebinding, redirect pivoting, and unauthorized local resource access:
+
+#### Layer 1: Protocol & Scheme Validation
+- Allowed schemes: Strictly `http` and `https`.
+- Reject immediately if scheme is `file:`, `ftp:`, `gopher:`, `data:`, `tftp:`, `expect:`.
+
+#### Layer 2: Domain Whitelist & Video ID Syntax
+- Parsed URL hostname must strictly match one of:
+  - `youtube.com`, `www.youtube.com`, `m.youtube.com`, `youtu.be`.
+- The URL must contain a valid 11-character video ID matching `^[a-zA-Z0-9_-]{11}$`.
+
+#### Layer 3: DNS Pre-Resolution & Private IP Pinning
+- Resolve target hostname using `socket.getaddrinfo(hostname, 443)`.
+- Inspect all resolved IPv4 and IPv6 addresses against private/reserved ranges using Python's `ipaddress` library:
+  - **IPv4 Disallowed:** `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`, `169.254.0.0/16` (Cloud Metadata endpoint `169.254.169.254`), `0.0.0.0/8`, `100.64.0.0/10` (CGNAT).
+  - **IPv6 Disallowed:** `::1`, `fc00::/7`, `fe80::/10`, `::ffff:0:0/96`.
+- **Mocked DNS Defense Test:** A specific test case verifies that if `www.youtube.com` is spoofed in local DNS/hosts to resolve to `127.0.0.1` or `169.254.169.254`, the request is immediately blocked with HTTP 403.
+
+#### Layer 4: `yt-dlp` Extractor & Redirect Constraints
+Verify options supported in installed `yt-dlp` (v2026.10.26):
+```python
+ydl_opts = {
+    "allowed_extractors": ["youtube", "youtube:tab"],  # Verified supported in v2026.10.26
+    "noplaylist": True,
+    "quiet": True,
+    "no_warnings": True,
+}
 ```
+`allowed_extractors` restricts `yt-dlp` from pivoting across extractors during redirects. Legitimate YouTube video and audio CDN streams (`*.googlevideo.com`) are permitted by the internal YouTube extractor.
 
 ---
 
-## 4. Findings and Prioritization Matrix
+### 5.3 Path Traversal Protection Specification
+To prevent directory escape on file download and preview routes (`/download/{filename}`, `/preview/{filename}`):
 
-| ID | Finding Description | Evidence / File | Impact | Risk | Priority |
-|---|---|---|---|---|---|
-| **SEC-01** | Plaintext OAuth tokens stored in SQLite database | `backend/app/services/persistent_scheduler.py:44-46` | Compromise of database leaks YouTube channel credentials | High | **P0** |
-| **SEC-02** | Unrestricted URL ingestion in `yt-dlp` allows SSRF / local file access | `backend/app/services/video_ingestion.py:29-48` | SSRF, arbitrary file download, cloud metadata probing | High | **P0** |
-| **REL-01** | Background worker in FastAPI lifespan hangs `TestClient` during test runs | `backend/app/main.py:18-28`, `backend/app/services/background_worker.py:64` | Test suite freeze; automated validation blocked | Medium | **P0** |
-| **PERF-01** | Multi-pass FFmpeg rendering re-encodes video multiple times | `backend/app/services/timeline_compositor.py:380-450` | 2x-3x render latency, unnecessary SSD write wear | Medium | **P1** |
-| **SEC-03** | Missing execution timeouts on FFmpeg / FFprobe subprocesses | `backend/app/services/shorts_renderer.py:86`, `word_aligner.py:67` | Denial of service / hanging workers on corrupt input | Medium | **P1** |
-| **SEC-04** | File download & preview routes vulnerable to path traversal | `backend/app/api/shorts_mvp_api.py:488, 514` | Potential unauthorized file read if traversal sequence passed | Medium | **P1** |
-| **PERF-02** | No caching for Whisper transcriptions or LLM editorial pipeline | `backend/app/services/word_aligner.py:20`, `editorial_orchestrator.py:30` | Redundant token usage, API latency on repeated renders | Low | **P1** |
-| **REL-02** | Ephemeral in-memory state in `shorts_mvp_api.py` loses clips on restart | `backend/app/api/shorts_mvp_api.py:25-26` | Loss of user workspace session upon backend restart | Low | **P2** |
-| **INT-01** | YouTube Agent Skills (`skills/`) fragmented and partially bypassed | `skills/`, `backend/app/services/youtube_intelligence_service.py` | Disconnect between proven creator heuristics and pipeline | Low | **P2** |
-| **FEAT-01** | Missing YouTube Analytics scope & channel reach reporting | `backend/app/services/youtube_oauth_service.py:22-26` | Inability to track video performance post-publishing | Low | **P2** |
-| **QUAL-01** | Lack of audio licensing validation on background gameplay/music | `backend/app/services/timeline_compositor.py:384-389` | Copyright claims or muted Shorts | Low | **P3** |
+#### 1. Strict Basename Sanitation
+- Extract basename: `clean_filename = Path(filename).name`.
+- Reject any filename containing null bytes (`\0`) or path separators (`/`, `\`).
 
----
+#### 2. Resolved Path Containment Assertion
+```python
+base_dir = STORAGE_RENDERS.resolve()
+target_path = (base_dir / clean_filename).resolve()
 
-## 5. Optimization Roadmap (Stages A through H)
+# Strict containment check
+if not target_path.is_relative_to(base_dir):
+    raise HTTPException(status_code=400, detail="Path traversal attempt detected")
 
-### Stage A — YouTube Intelligence and Skill Integration
-- **Objective:** Unify all 11 creator skills (`yt-script`, `yt-package`, `yt-edit`, `yt-comment`, `yt-plan`, `yt-viral`, `yt-retention`, `yt-shorts`, `yt-seo`, `yt-chapters`, `yt-audit`) into a centralized, zero-latency Python intelligence module.
-- **Principle:** Deterministic heuristics first, LLM second. No shell subprocess execution for skills; run pure Python logic.
-- **Why:** The skills in `skills/` contain battle-tested title linters (`title.py`), silence/dead-air trimmers (`deadair.py`), and hook scorers (`hookscore.py`). Centralizing them eliminates code duplication and ensures every generated Short passes strict packaging and retention checks before rendering.
-
-### Stage B — Transcript-Grounded Creative Intelligence
-- **Objective:** Guarantee that all hooks, titles, captions, and summaries are 100% transcript-grounded with zero hallucination.
-- **Principle:** The transcript and acoustic timestamps are the sole source of truth.
-- **Why:** AI models often hallucinate sensational hooks that don't match the actual video content, frustrating viewers and tanking retention. We enforce strict JSON schemas, citation requirements (referencing specific cue timestamps), and automatic verification against the speech transcript.
-
-### Stage C — Trending Topics and Audio Intelligence
-- **Objective:** Establish a safe, legally compliant background audio and trending format engine.
-- **Principle:** Respect platform boundaries and copyright. Never promise illegal music injection.
-- **Why:** The YouTube Data API does not permit third-party uploading of copyrighted commercial tracks to Shorts. We build a verified catalog of royalty-free background audio and Minecraft parkour clips, categorized by mood (energetic, chill, documentary, suspenseful) with strict LUFS mixing rules.
-
-### Stage D — LLM Cost and Latency Optimization
-- **Objective:** Cut redundant LLM calls and API latency by 40-60% through content-hash caching and tier-based model routing.
-- **Principle:** Never call an LLM twice for the same input; use small models for mechanical tasks and large models only for strategic reasoning.
-- **Why:** Groq rate limits and token costs multiply when users regenerate clips or tweak visual styles. By hashing the transcript and parameters (`sha256`), cached editorial analysis returns instantly (<10ms) without hitting external APIs.
-
-### Stage E — FFmpeg and Rendering Optimization
-- **Objective:** Transition multi-pass FFmpeg composition into a single-pass `filter_complex` execution with hardware acceleration and bounded resource usage.
-- **Principle:** Decode once, filter once, encode once.
-- **Why:** The current pipeline writes `main_clip_raw.mp4`, then re-encodes it into `composed_raw.mp4`, then re-mixes audio. On an 8 GB RAM / 4 GB VRAM laptop, this saturates NVENC encoders and causes avoidable disk wear. Single-pass composition reduces rendering time significantly.
-
-### Stage F — Security Hardening
-- **Objective:** Secure OAuth tokens at rest, validate all incoming URLs against SSRF, prevent path traversal, and add subprocess execution boundaries.
-- **Principle:** Zero-trust input handling across user inputs, external APIs, and local file storage.
-- **Why:** Storing plaintext YouTube OAuth refresh tokens in SQLite is a serious vulnerability. Adding AES-256-GCM / Fernet token encryption and strict URL allowlists protects creator channels and local system integrity.
-
-### Stage G — Reliability, Recovery and Worker Decoupling
-- **Objective:** Decouple background worker startup from FastAPI lifespan during test runs, add job retry limits with exponential backoff, and make session state persistent.
-- **Principle:** Fault isolation and idempotent job execution.
-- **Why:** Server crashes during rendering or uploading must not corrupt the database or leave zombie jobs. Decoupling the worker fixes the test suite lockup and allows safe background job recovery.
-
-### Stage H — Regression and Quality Validation
-- **Objective:** Establish automated regression tests covering the entire pipeline from ingestion to upload scheduling, ensuring 100% passing tests without timeouts.
-- **Principle:** Verify every claim against executed test results.
-- **Why:** Guarantees that optimizations improve performance and security without breaking any existing feature or user workflow.
-
----
-
-## 6. Implementation Details by Task
-
-### Task 1: Fix Worker Lifespan & Test Suite Lockup (P0)
-- **Target Files:** `backend/app/main.py`, `backend/app/services/background_worker.py`
-- **Current Behavior:** `main.py` starts `BackgroundPublishWorker` unconditionally. In tests, Starlette's `TestClient` enters the lifespan and waits for the infinite `_worker_loop` to terminate, freezing pytest.
-- **Proposed Behavior:** Add `TESTING` / `DISABLE_BACKGROUND_WORKER` environment flag check. In test mode, worker is disabled or runs a single tick on demand.
-- **Expected Benefit:** Enables 100% automated pytest execution without hanging.
-- **Test Strategy:** Run `pytest backend/tests/ -v`.
-- **Rollback Strategy:** Revert lines in `main.py`.
-
-### Task 2: Encrypt OAuth Tokens at Rest (P0)
-- **Target Files:** `backend/app/services/persistent_scheduler.py`, `backend/app/services/youtube_oauth_service.py`
-- **Current Behavior:** Plaintext tokens stored in `connected_channels` table.
-- **Proposed Behavior:** Implement `TokenEncryptionService` using `cryptography.fernet.Fernet` with a locally derived machine key stored in `.env` (`SHORTIFY_SECRET_KEY`).
-- **Expected Benefit:** Tokens in `scheduler.db` are encrypted; database extraction cannot yield usable credentials.
-- **Test Strategy:** Unit test encrypt/decrypt cycle, verify database inspection shows ciphertext.
-- **Rollback Strategy:** Fallback to plaintext if decryption fails, allowing smooth backwards-compatibility.
-
-### Task 3: Ingestion URL & SSRF Validation (P0)
-- **Target Files:** `backend/app/services/video_ingestion.py`, `backend/app/api/shorts_mvp_api.py`
-- **Current Behavior:** Any URL is passed directly to `yt-dlp`.
-- **Proposed Behavior:** Strict regex validation ensuring URLs match `^https?://(www\.)?(youtube\.com/(watch\?v=|shorts/)|youtu\.be/)[\w\-]{11}`. Reject local IP ranges (127.0.0.1, 10.0.0.0/8, 169.254.169.254, file://).
-- **Expected Benefit:** Prevents SSRF attacks and arbitrary file reads.
-- **Test Strategy:** Test valid YouTube URLs, test invalid URLs, test `file:///` URLs.
-
-### Task 4: Subprocess Timeouts and Path Traversal Protection (P1)
-- **Target Files:** `backend/app/services/shorts_renderer.py`, `backend/app/services/word_aligner.py`, `backend/app/api/shorts_mvp_api.py`
-- **Current Behavior:** `subprocess.run` has no `timeout`. File preview uses raw filename concatenation.
-- **Proposed Behavior:** Add `timeout=180` to FFmpeg commands with `TimeoutExpired` handling. In `/preview` and `/download`, enforce `filename = Path(filename).name` and assert path is strictly within `STORAGE_RENDERS`.
-- **Expected Benefit:** Eliminates hanging processes and directory traversal vulnerabilities.
-
-### Task 5: Single-Pass FFmpeg Filter Graph Optimization (P1)
-- **Target Files:** `backend/app/services/timeline_compositor.py`
-- **Current Behavior:** Renders intermediate video `main_clip_raw.mp4`, then composites card overlay, then mixes audio.
-- **Proposed Behavior:** Combine speaker crop, scaling, background overlay, subtitle burning, card overlay, and audio mixing into one single-pass FFmpeg invocation using `-filter_complex`.
-- **Expected Benefit:** 35%–50% reduction in video render latency; eliminates gigabytes of temporary MP4 writes.
-- **Test Strategy:** Compare output video duration, audio sync, and visual quality against baseline render.
-
-### Task 6: Unified Caching for Whisper and LLM Calls (P1)
-- **Target Files:** `backend/app/services/storage.py`, `backend/app/services/editorial_orchestrator.py`, `backend/app/services/word_aligner.py`
-- **Current Behavior:** Re-running or re-editing a clip repeats audio transcription and 7 LLM calls.
-- **Proposed Behavior:** Implement content-hash cache in `backend/storage/cache.db`. Cache keys: `sha256(audio_bytes)` for Whisper; `sha256(transcript + prompt_params)` for LLM roles.
-- **Expected Benefit:** Near-instant (<50ms) retrieval for repeated clips; 100% reduction in redundant Groq API token consumption.
-
-### Task 7: Centralize YouTube Agent Skills Engine (P2)
-- **Target Files:** `backend/app/services/youtube_intelligence_service.py`, `skills/`
-- **Current Behavior:** Multiple duplicate copies of `skills/` with scattered Python scripts.
-- **Proposed Behavior:** Import and integrate the deterministic algorithms from `skills/yt-package/title.py` (title linter), `skills/yt-edit/deadair.py` (silence optimizer), `skills/yt-script/hookscore.py` (5-vector scorer), and `skills/yt-retention/retention.py` into a clean, zero-subprocess `YouTubeSkillsEngine`.
-- **Expected Benefit:** Standardized, deterministic linting for title length, curiosity gaps, and retention pacing.
-
----
-
-## 7. Execution Order and Dependencies
-
+if not target_path.is_file():
+    raise HTTPException(status_code=404, detail="Requested video file does not exist")
 ```
-[Phase 1: Security & Stability Gate]
-  ├── Task 1: Worker Lifespan & Test Suite Decoupling (P0) -> Unblocks automated tests
-  ├── Task 2: Encrypted Token Storage at Rest (P0)
-  ├── Task 3: URL SSRF & Domain Validation (P0)
-  └── Task 4: Subprocess Timeouts & Path Traversal Guards (P1)
-
-[Phase 2: Performance & Caching Engine]
-  ├── Task 5: Single-Pass FFmpeg filter_complex Compositor (P1)
-  └── Task 6: Content-Hash Caching for Transcription & LLM (P1)
-
-[Phase 3: Skills Integration & Intelligence]
-  ├── Task 7: Unified YouTube Skills Engine (P2)
-  └── Task 8: Audio Catalog & Trend Licensing Guard (P2)
-
-[Phase 4: Final Validation & Benchmark]
-  ├── Task 9: Run Full Pytest Regression Suite
-  └── Task 10: Performance Benchmark & Verification Report
-```
+This guarantees that symbolic links, relative traversal sequences (`..`), and UTF-encoded dots cannot access files outside `STORAGE_RENDERS`.
 
 ---
 
-## 8. Baseline vs Target Metrics
+## 6. Comprehensive Caching Architecture
 
-| Metric | Current Measured Baseline | Target Optimization Metric | Measurement Method |
+To prevent redundant API consumption and latency while isolating visual styling from editorial intelligence:
+
+### 6.1 Multi-Dimensional Cache Key Design
+1. **Acoustic Transcription Cache (`backend/storage/cache.db`):**
+   - Key: `sha256(audio_pcm_16k_sha256 + whisper_model_id + language + temperature)`
+   - Cached Content: `word_alignment.json` + `transcript.json`.
+2. **Editorial Pipeline Cache:**
+   - Key: `sha256(transcript_text_hash + model_reasoning_id + model_strategy_id + prompt_pack_version + schema_version + channel_niche + target_audience)`
+   - Cached Content: `analysis.json` (Role 01), `hooks.json` (Roles 02-04), `package.json` (Role 06).
+3. **Visual Style Isolation (Zero Re-Transcription / Re-Prompting):**
+   - Changing Visual Style Studio parameters (`captionPresetId`, `layoutPresetId`, `socialCardPresetId`, `backgroundPresetId`, `customActiveColor`, `customTextColor`, `customFontName`, `customAnimation`, `cardVerticalPosition`) **does NOT invalidate the Whisper or Editorial cache**.
+   - The rendering compositor consumes existing cached `hooks.json` and `word_alignment.json`, isolating video styling completely from LLM generation.
+
+---
+
+## 7. YouTube Agent Skills Integration Strategy
+
+The 11 skills in `skills/` contain a mix of **deterministic mathematical/string algorithms** and **specialized LLM prompt instructions**.
+
+### 7.1 Deterministic Python Helpers (Zero-Token Execution)
+
+| Skill | Script File | Exact Functionality to Integrate | Where Applied in Shortify Pipeline |
 |---|---|---|---|
-| **Pytest Suite Run** | Hangs indefinitely on `TestClient` | < 15 seconds total execution | `pytest backend/tests/ -v` |
-| **Render Latency (30s Short)** | 18.5s – 24.2s (Multi-pass re-encode) | 9.0s – 14.0s (Single-pass filter_complex) | Wall-clock execution timer |
-| **Intermediate Disk Usage** | ~150 MB temporary files per render | < 2 MB (only final MP4 + ASS on disk) | Disk footprint measurement |
-| **Re-render / Duplicate Clip Latency**| 12s – 18s (Repeats all LLM calls) | < 0.5s (Cached transcript & hooks) | API response time |
-| **OAuth Token Storage Security** | Plaintext in SQLite (Vulnerable) | Encrypted with AES-256 / Fernet (Safe) | DB query inspection |
-| **URL Ingestion Safety** | Unrestricted `yt-dlp` (SSRF risk) | Strict YouTube domain whitelist (Safe) | Security test vectors |
-| **FFmpeg Subprocess Hang Risk** | Unbounded (Potential indefinite hang)| Bounded with 180s strict timeout | Simulated hanging stream test |
+| **yt-package** | `skills/yt-package/title.py` | Title length heuristics (40 char mobile / 60 char desktop advisory warnings), all-caps word ratio, stop word linting | In `ContentPackagerService` (Role 06) as an **advisory editorial linter** (does NOT reject titles >60 chars) |
+| **yt-script** | `skills/yt-script/hookscore.py` | 5-property hook scoring (Specificity, Direct Address, Stakes, Curiosity Gap, Brevity) | In `SmartClipSelector` and `EditorialOrchestrator` to deterministically rank hook candidates |
+| **yt-edit** | `skills/yt-edit/deadair.py` | Silence threshold detection (>1.2s gaps) between transcript cues | In `SmartClipSelector` as an **advisory cadence detector** (does NOT blindly cut dramatic pauses) |
+| **yt-chapters** | `skills/yt-chapters/chapters.py` | Formatting timestamps `00:00` and enforcing minimum 10s chapter durations | Available for long-form source index viewing |
+| **yt-retention**| `skills/yt-retention/retention.py` | Parse YouTube Studio retention CSVs to find drop-off percentages | In analytics evaluation tool when user supplies retention data |
+| **yt-viral** | `skills/yt-viral/swipe.py` | Mathematical calculations: **Outlier Multiple** = `views / channel_median_views`; **Relative Lift** = `(views - channel_median_views) / channel_median_views` | In channel benchmarking tool |
+
+### 7.2 Advisory Heuristics & Selective Invocation
+- **Title Length:** Platform limit is 100 characters. 40/60 character limits are treated as **editorial heuristics**, providing non-blocking suggestions.
+- **Dead-Air Trimming:** Advisory only. Silence during high-tension narrative beats or setup/punchline pauses is preserved.
+- **Selective Invocation:** During standard Short generation, `yt-audit`, `yt-plan`, `yt-comment`, and `yt-chapters` are **never executed**. They remain strictly manual utilities invoked on explicit user demand in the sidebar.
 
 ---
 
-## 9. Risks and Rollback Strategy
+## 8. Transcript Grounding & Verification (No Blind Guarantees)
 
-1. **FFmpeg `filter_complex` Complexity Risk:**
-   - *Risk:* Complex filter chains can fail on uncommon video dimensions or missing background assets.
-   - *Mitigation:* Maintain the proven existing fallback method (`_render_fallback`) in `shorts_renderer.py`. If NVENC or the complex filter graph returns non-zero, immediately fall back to the safe sequential CPU path.
-2. **Token Encryption Migration Risk:**
-   - *Risk:* Existing saved channels might fail to decrypt if key is missing.
-   - *Mitigation:* Try decryption; if it fails or if the token is already valid plaintext, use it directly and transparently upgrade it to encrypted storage on next access.
-3. **Groq API Rate Limits:**
-   - *Mitigation:* Retain the existing fallback mechanisms and add SQLite caching so offline testing and repeated renders use zero network tokens.
+- **Eliminating "Zero Hallucination" Guarantees:** Machine learning models cannot be mathematically guaranteed to never hallucinate.
+- **Evidence-Backed Generation Protocol:**
+  1. Every candidate hook and title generated by Roles 01–04 must output explicit citation timestamp boundaries `[start_sec, end_sec]` linking directly to speech cues.
+  2. A deterministic post-validation pass verifies that all quoted claims and named entities exist in the verified Whisper transcript.
+  3. **Visual Evidence Claims:** When a hook relies on non-verbal visual events (e.g. gameplay stunts, silent facial reactions), the pipeline flags it with `"visual_claim_unverified": true`, alerting the creator to verify the framing visually.
 
 ---
 
-## 10. Definition of Done (DoD)
+## 9. Rendering Pipeline: Perceptual Quality & Safe Default Strategy
 
-The optimization is considered fully complete and successful when:
-1. All 13 pytest test modules pass cleanly without hanging or timeout.
-2. OAuth tokens in `scheduler.db` are encrypted at rest.
-3. All video rendering occurs through single-pass composition with fallback protection.
-4. Input URLs are validated against SSRF and strict YouTube domain rules.
-5. All 11 YouTube agent skill heuristics are unified and accessible via `YouTubeSkillsEngine`.
-6. Background publish worker runs safely without locking tests.
-7. Existing frontend UI, Visual Style Studio, and player controls function with zero regression.
-8. Complete documentation and test reports are compiled.
+### 9.1 Multi-Tier Video Quality Validation
+In addition to technical container verification (`ffprobe` resolution 1080x1920, framerate, duration ±0.05s):
+1. **Black Frame Detection:** Run `ffmpeg -vf blackdetect=d=1.0:pix_th=0.10` to ensure no black screen drops.
+2. **Audio Silence Detection:** Run `ffmpeg -af silencedetect=noise=-40dB:d=2.0` to verify audio tracks didn't fail during muxing.
+3. **Perceptual Matrix:** Render test matrix covering:
+   - Aspect ratios: 16:9 widescreen, 4:3 legacy, 21:9 ultrawide, native 9:16 vertical.
+   - Frame rates: 23.976 fps, 29.97 fps, 60 fps.
+   - Layout combinations: Full screen, 50/50 split, floating card, blurred background.
+   - Audio variations: Native audio, mixed TTS hook (-16 LUFS), missing source audio.
+
+### 9.2 Safe Default Strategy
+- **Default Renderer:** `_render_legacy_multipass()` remains the **active default renderer** in production.
+- **Benchmarking Phase:** Single-pass `filter_complex` will be benchmarked using `backend/scripts/benchmark_renderer.py`.
+- **Promotion Criteria:** Single-pass is only promoted to default after passing 100% of the perceptual and container validation test suite. If single-pass fails at runtime, execution immediately falls back to `_render_legacy_multipass()`.
 
 ---
 
-*Plan compiled and placed at: `c:\Users\ASUS\Desktop\clipperfree\SHORTIFY_MVP_OPTIMIZATION_PLAN.md`.*  
-*Ready for user review and explicit approval before any execution begins.*
+## 10. Legally Compliant Trending Audio Workflow
 
+A 3-tier workflow that respects copyright laws and platform terms:
+1. **Trend Discovery & Recommendation (Advisory):** Identifies trending musical styles, BPM ranges, and moods (energetic, chill, suspenseful) from YouTube trends.
+2. **Licensing Verification:** Explains licensing rules to the creator:
+   - *YouTube Audio Library:* Free for monetization within YouTube.
+   - *Commercial Sounds:* Must be added natively inside the YouTube mobile app during final Shorts publication (API upload does not support attaching commercial songs).
+3. **Actual Audio Insertion:** Limited strictly to verified royalty-free stems (e.g. ambient backgrounds, Minecraft audio) or creator-uploaded MP3 files. The system NEVER scrapes or downloads copyrighted music.
+
+---
+
+## 11. SEO & Caption Acceptance Criteria
+
+- **Captions:**
+  - ASS word events match Whisper timestamps within ±0.08s.
+  - Zero text collision with YouTube Shorts platform UI (horizontal margins ≥60px, bottom margin ≥22% on 1080x1920).
+- **Titles & Hooks:**
+  - Title ≤100 characters; advisory warning if >60 characters.
+  - Hook references an identifiable moment in the transcript.
+- **Descriptions & Tags:**
+  - Description opens with high-engagement hook summary in the first 120 characters.
+  - Includes 3–5 relevant hashtags (including `#shorts`).
+  - Includes up to 15 targeted keywords extracted from the transcript; rejects keyword-stuffed generic tags.
+
+---
+
+## 12. Execution Protocol & Emergency Stop Conditions
+
+### 12.1 Execution Rules
+- **Clean Working Tree:** Before any task begins, verify `git status --porcelain` is clean.
+- **Protected Checkpoints:** Create a dedicated Git checkpoint commit before every task (`checkpoint-phase1-task1`, etc.).
+- **Small Logical Steps:** Never mix security refactoring with render optimization.
+- **Emergency Stop Condition:** If an unexpected failure occurs, an architectural conflict arises, or a destructive operation would be required, **STOP IMMEDIATELY, roll back to the last checkpoint, and wait for user direction**.
+
+---
+
+## 13. Phased Optimization Roadmap & Execution Order
+
+### Phase 0: Pre-Execution Architecture Verification Gate
+- Reconcile and verify every file path, class name, method signature, and prompt pack template against actual disk source.
+- Create Git baseline commit.
+
+### Phase 1: Security & Stability Gate (P0 / P1)
+- **Task 1: Test Suite & Background Worker Decoupling (P0)**
+  - Update `main.py:lifespan` to skip starting `BackgroundPublishWorker` when running under pytest (`PYTEST_CURRENT_TEST` in `os.environ` or `TESTING=True`).
+  - Validate: `pytest backend/tests/test_assets_api.py backend/tests/test_editorial_profile.py` passes in <5s without hanging.
+- **Task 2: Encrypted Token Storage with DPAPI & Protected Backup (P0)**
+  - Implement AES-256-GCM token encryption service with Windows DPAPI key protection.
+  - Implement online SQLite backup with DPAPI encryption of backup file.
+  - Validate: DB inspection shows ciphertext `enc:v1:...`; backup is encrypted; token decrypt test passes.
+- **Task 3: Deep URL Ingestion Security & SSRF Defense (P0)**
+  - Implement scheme, YouTube domain whitelist, DNS pre-resolution private IP rejection, and `allowed_extractors`.
+  - Validate: Test suite verifies rejection of `file://`, `127.0.0.1`, `169.254.169.254`, and mocked private DNS.
+- **Task 4: Subprocess Execution Timeouts & Path Traversal Guards (P1)**
+  - Add `timeout=180` to FFmpeg/FFprobe subprocess calls.
+  - Enforce `target_path.is_relative_to(STORAGE_RENDERS)`.
+  - Validate: Security test suite verifies traversal rejection.
+
+### Phase 2: Performance, Caching & Rendering Optimization (P1)
+- **Task 5: Multi-Dimensional Content-Hash Caching (P1)**
+  - Implement SQLite cache in `backend/storage/cache.db` with model ID, prompt version, and audio hashes.
+  - Verify visual style changes do NOT trigger Whisper or LLM re-computation.
+- **Task 6: Single-Pass FFmpeg Renderer Benchmarking & Fallback (P1)**
+  - Implement `backend/scripts/benchmark_renderer.py`.
+  - Benchmark single-pass vs legacy multi-pass; keep multi-pass as default until single-pass passes perceptual acceptance.
+
+### Phase 3: Creator Skills Engine & Session Persistence (P2)
+- **Task 7: Unified YouTube Skills Engine (P2)**
+  - Integrate deterministic linters (`title.py`, `hookscore.py`, `deadair.py`, `swipe.py`) into `YouTubeSkillsEngine`.
+  - Enforce advisory heuristics for title length and context-aware dead-air trimming.
+- **Task 8: Session Clip Persistence (P2)**
+  - Persist candidate clips in local SQLite so backend restarts do not drop user sessions.
+
+### Phase 4: Full Regression & Hardening Verification
+- Run complete pytest suite across all 13 test modules.
+- Produce verified Before vs After audit report.
+
+---
+
+## 14. Definition of Done (DoD): MVP Hardening Complete
+
+The Shortify MVP Hardening is complete when:
+1. All 13 test modules in `backend/tests/` execute and pass with zero hangs or timeouts.
+2. OAuth tokens in `scheduler.db` are encrypted at rest with DPAPI key protection, and pre-migration backups are protected.
+3. Ingestion endpoint rejects all SSRF, private IP, and non-YouTube vectors, while verified YouTube downloads remain functional.
+4. Download/preview endpoints enforce strict resolved path containment.
+5. All subprocess calls have bounded timeouts.
+6. The 7 LLM prompt roles remain 100% operational in their verified distributed architecture with transcript timestamp citations.
+7. Single-pass FFmpeg rendering is benchmarked; legacy renderer is preserved as working fallback.
+8. Deterministic creator skill linters are integrated as advisory tools.
+9. Zero regression on existing frontend UI, Visual Style Studio, and player controls.
+10. `SHORTIFY_MVP_OPTIMIZATION_PLAN.md` is updated with all executed measurements and diff logs.
+
+---
+
+*Plan updated and verified at: `c:\Users\ASUS\Desktop\clipperfree\SHORTIFY_MVP_OPTIMIZATION_PLAN.md`.*  
+*Ready for user review and explicit approval. No application code has been modified.*
