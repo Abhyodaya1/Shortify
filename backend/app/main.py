@@ -21,13 +21,26 @@ from .services.persistent_scheduler import PersistentScheduler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Initialize persistence and launch background worker daemon
+    # Startup: Initialize persistence
     PersistentScheduler.init_db()
-    worker = BackgroundPublishWorker.get_instance()
-    await worker.start()
+
+    # Avoid spawning the infinite background polling loop during pytest or automated test runs
+    is_test_env = (
+        os.getenv("TESTING", "").lower() in ("1", "true", "yes")
+        or os.getenv("DISABLE_BACKGROUND_WORKER", "").lower() in ("1", "true", "yes")
+        or "PYTEST_CURRENT_TEST" in os.environ
+    )
+
+    worker = None
+    if not is_test_env:
+        worker = BackgroundPublishWorker.get_instance()
+        await worker.start()
+
     yield
+
     # Shutdown: Stop worker cleanly
-    await worker.stop()
+    if worker is not None:
+        await worker.stop()
 
 
 app = FastAPI(
