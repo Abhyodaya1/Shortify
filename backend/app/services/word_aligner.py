@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 import httpx
 from dotenv import load_dotenv
+from .cache_service import ContentCacheService
 
 load_dotenv()
 
@@ -76,8 +77,26 @@ class WordAligner:
         audio_wav = out_dir / "audio.wav"
         cls.extract_clip_audio(source_media_path, start_sec, end_sec, str(audio_wav))
 
-        # Perform Whisper word alignment
-        raw_result = cls._transcribe_with_groq(str(audio_wav))
+        # Check multi-dimensional acoustic cache before remote API call
+        audio_bytes = audio_wav.read_bytes()
+        cache_key = ContentCacheService.compute_whisper_cache_key(
+            audio_bytes=audio_bytes,
+            model_id=cls.WHISPER_MODEL,
+            language="auto",
+            temperature=0.0,
+        )
+        cached_result = ContentCacheService.get(cache_key)
+        if cached_result is not None:
+            raw_result = cached_result
+        else:
+            # Perform Whisper word alignment
+            raw_result = cls._transcribe_with_groq(str(audio_wav))
+            ContentCacheService.set(
+                cache_key=cache_key,
+                cache_type="whisper",
+                content=raw_result,
+                metadata={"clip_id": clip_id, "duration": end_sec - start_sec},
+            )
 
         # Validate and clean word/segment timelines
         validated_data = cls._process_and_validate(raw_result, expected_duration=end_sec - start_sec)

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 import httpx
 from dotenv import load_dotenv
+from .cache_service import ContentCacheService
 
 load_dotenv()
 
@@ -43,6 +44,27 @@ class EditorialOrchestrator:
         segments = transcript_data.get("segments", [])
         first_line = segments[0]["text"] if segments else (full_transcript[:60] if full_transcript else "")
         last_line = segments[-1]["text"] if segments else (full_transcript[-60:] if full_transcript else "")
+
+        # Check multi-dimensional cache to bypass LLM calls if identical transcript & strategy params
+        cache_key = ContentCacheService.compute_editorial_cache_key(
+            transcript_text=full_transcript,
+            reasoning_model=cls.MODEL_REASONING,
+            strategy_model=cls.MODEL_STRATEGY,
+            channel_niche=channel_niche,
+            target_audience=target_audience,
+            editorial_preferences=editorial_preferences,
+        )
+        cached_artifact = ContentCacheService.get(cache_key)
+        if cached_artifact is not None:
+            cached_artifact["clip_id"] = clip_id
+            cached_artifact["duration_seconds"] = duration_seconds
+            if output_dir:
+                out_p = Path(output_dir)
+                out_p.mkdir(parents=True, exist_ok=True)
+                hooks_json_path = out_p / "hooks.json"
+                with open(hooks_json_path, "w", encoding="utf-8") as f:
+                    json.dump(cached_artifact, f, indent=2)
+            return cached_artifact
 
         # -------------------------------------------------------------
         # STEP 1: Role 01 — Transcript Analyst
@@ -156,6 +178,14 @@ class EditorialOrchestrator:
             "full_headlines": headline_data,
             "full_judge_verdict": judge_data,
         }
+
+        # Store in multi-dimensional cache
+        ContentCacheService.set(
+            cache_key=cache_key,
+            cache_type="editorial",
+            content=final_hooks_artifact,
+            metadata={"clip_id": clip_id, "duration": duration_seconds, "channel_niche": channel_niche},
+        )
 
         if output_dir:
             out_p = Path(output_dir)
