@@ -153,3 +153,4 @@ class ContentCacheService:
             cursor.execute("SELECT COUNT(*) as total FROM pipeline_cache")
             total = cursor.fetchone()["total"]
             return {"total_cached_items": total, "by_type": type_counts}
+

@@ -459,6 +459,7 @@ class MasterTimelineCompositor:
                 with PILImage.open(str(card_overlay_path)) as c_img:
                     c_w, c_h = c_img.size
 
+        # Dispatch to single-pass or legacy multi-pass renderer
         # Rendering Step: Support single-pass filter_complex or legacy multi-pass
         should_use_single_pass = use_single_pass or os.getenv("SHORTIFY_RENDERER") == "single_pass"
 

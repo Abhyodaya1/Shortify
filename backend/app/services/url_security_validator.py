@@ -161,3 +161,4 @@ class URLSecurityValidator:
                 )
 
         return url_clean, video_id
+

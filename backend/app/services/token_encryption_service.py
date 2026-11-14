@@ -296,3 +296,4 @@ class TokenEncryptionService:
 
         logger.info(f"[Security] Migrated {migrated_count} tokens to AES-256-GCM encryption.")
         return migrated_count
+

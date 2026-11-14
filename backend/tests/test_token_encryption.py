@@ -100,3 +100,4 @@ def test_token_migration_preserves_tokens(tmp_path):
         dec_ac = TokenEncryptionService.decrypt_token(row[1])
         assert dec_rf == "plaintext_refresh_token_123"
         assert dec_ac == "plaintext_access_token_456"
+

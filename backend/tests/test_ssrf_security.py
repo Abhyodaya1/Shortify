@@ -141,3 +141,4 @@ class TestSSRFAPIIntegration:
         resp = client.post("/api/v1/shorts/ingest-url", json={"url": "https://www.youtube.com/watch?v=bad"})
         assert resp.status_code == 400
         assert "Invalid URL" in resp.json()["detail"]
+
