@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
+from .token_encryption_service import TokenEncryptionService, TokenDecryptionError
 
 DB_DIR = Path("backend/storage")
 if not DB_DIR.exists():
@@ -101,6 +102,13 @@ class PersistentScheduler:
             except Exception:
                 pass
 
+        # Migrate any existing legacy plaintext tokens to AES-256-GCM
+        try:
+            TokenEncryptionService.migrate_scheduler_db(DB_PATH)
+        except Exception as e:
+            import logging
+            logging.getLogger("persistent_scheduler").error(f"[Security] Token migration error: {e}")
+
     @classmethod
     def get_channel_status(cls, user_id: str = "default_user") -> Optional[Dict[str, Any]]:
         cls.init_db()
@@ -109,7 +117,18 @@ class PersistentScheduler:
             cur.execute("SELECT * FROM connected_channels WHERE user_id = ? LIMIT 1", (user_id,))
             row = cur.fetchone()
             if row:
-                return dict(row)
+                res = dict(row)
+                ch_id = res.get("channel_id", "")
+                try:
+                    if res.get("refresh_token"):
+                        res["refresh_token"] = TokenEncryptionService.decrypt_token(res["refresh_token"], ch_id)
+                    if res.get("access_token"):
+                        res["access_token"] = TokenEncryptionService.decrypt_token(res["access_token"], ch_id)
+                except TokenDecryptionError:
+                    res["status"] = "reauth_required"
+                    res["refresh_token"] = None
+                    res["access_token"] = None
+                return res
             return None
 
     @classmethod
@@ -243,6 +262,8 @@ class PersistentScheduler:
     ) -> Dict[str, Any]:
         cls.init_db()
         now_str = datetime.now(timezone.utc).isoformat()
+        enc_refresh = TokenEncryptionService.encrypt_token(refresh_token)
+        enc_access = TokenEncryptionService.encrypt_token(access_token)
         with cls._get_connection() as conn:
             cur = conn.cursor()
             cur.execute("""
@@ -252,7 +273,7 @@ class PersistentScheduler:
             """, (
                 channel_id, user_id, channel_title, custom_url, thumbnail_url,
                 subscriber_count, video_count, 1 if is_sandbox else 0,
-                refresh_token, access_token, now_str
+                enc_refresh, enc_access, now_str
             ))
         return cls.get_channel_status(user_id) or {}
 
