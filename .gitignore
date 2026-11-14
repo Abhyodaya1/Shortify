@@ -1,0 +1,163 @@
+# ==========================================
+# ENVIRONMENT & SECRETS — NEVER COMMIT
+# ==========================================
+.env
+.env.*
+*.env
+.env.local
+.env.development.local
+.env.production.local
+
+# Google OAuth client secret files
+client_secret_*.json
+*_client_secret*.json
+google_credentials.json
+service_account*.json
+
+# Private keys & certificates
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Database files (may contain OAuth tokens & refresh tokens)
+*.db
+*.sqlite
+*.sqlite3
+backend/storage/scheduler.db
+
+# ==========================================
+# PYTHON — Virtual envs, cache, build
+# ==========================================
+venv/
+.venv/
+backend/.venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+*.egg
+*.whl
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ==========================================
+# NODE / FRONTEND — dependencies & build
+# ==========================================
+node_modules/
+frontend/node_modules/
+.next/
+frontend/.next/
+out/
+frontend/out/
+.turbo/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ==========================================
+# LARGE MEDIA & RENDER STORAGE
+# Never commit rendered videos, uploads or generated assets
+# ==========================================
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.avi
+*.mp3
+*.wav
+*.aac
+*.ass
+*.srt
+
+backend/storage/renders/
+backend/storage/uploads/
+backend/storage/clips/
+backend/storage/backgrounds/
+backend/storage/
+
+data/
+data/**
+
+# ==========================================
+# AI AGENT WORKSPACES — not source code
+# ==========================================
+.codex/
+.agent/
+.agents/
+.claude/
+.claude-plugin/
+frontend/.agents/
+
+# ==========================================
+# ANALYSIS, RESEARCH & SCRATCH FILES
+# ==========================================
+stitch_opus_pro_ui_analysis/
+scratch/
+research/
+temp_yt_skill/
+install_skills.py
+
+# Root-level loose PNG/image assets from design tools (Pngtree etc.)
+*Pngtree*.png
+*Pngtree*.jpg
+
+# ==========================================
+# SKILL TEMPLATE FOLDERS (agent-generated)
+# ==========================================
+skills/
+yt-audit/
+yt-chapters/
+yt-comment/
+yt-edit/
+yt-package/
+yt-plan/
+yt-retention/
+yt-script/
+yt-seo/
+yt-shorts/
+yt-viral/
+youtube/
+
+# ==========================================
+# TEMPORARY DOCS & INSPECTION FILES
+# ==========================================
+instructions.md
+master_instructions.md
+API_MAP.md
+ARCHITECTURE.md
+DATA_MODEL.md
+EVIDENCE.md
+IMPLEMENTATION_PLAN.md
+RESEARCH.md
+shorts_mvp_documentation_pack/
+motion-bundle-analysis.json
+motion-inspection.json
+motion-viewport.json
+motion-viewport.png
+studio.html
+
+# ==========================================
+# OPERATING SYSTEM & IDE ARTIFACTS
+# ==========================================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+desktop.ini
+*.lnk

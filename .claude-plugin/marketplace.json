@@ -1,0 +1,15 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "shortify",
+  "description": "Shortify AI YouTube Shorts Generator",
+  "owner": { "name": "Abhyodaya", "url": "https://github.com/Abhyodaya1/Shortify" },
+  "plugins": [
+    {
+      "name": "youtube-agent",
+      "description": "Shortify visual studio, kinetic captions, and automated channel publishing.",
+      "source": "./",
+      "category": "productivity",
+      "homepage": "https://github.com/Abhyodaya1/Shortify"
+    }
+  ]
+}

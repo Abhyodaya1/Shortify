@@ -1,0 +1,39 @@
+{
+  "roles": [
+    {
+      "id": "01_transcript_analyst",
+      "system_prompt": "01_transcript_analyst/system.md",
+      "user_prompt": "01_transcript_analyst/user.md"
+    },
+    {
+      "id": "02_hook_strategist",
+      "system_prompt": "02_hook_strategist/system.md",
+      "user_prompt": "02_hook_strategist/user.md"
+    },
+    {
+      "id": "03_headline_writer",
+      "system_prompt": "03_headline_writer/system.md",
+      "user_prompt": "03_headline_writer/user.md"
+    },
+    {
+      "id": "04_editorial_judge",
+      "system_prompt": "04_editorial_judge/system.md",
+      "user_prompt": "04_editorial_judge/user.md"
+    },
+    {
+      "id": "05_subtitle_qa",
+      "system_prompt": "05_subtitle_qa/system.md",
+      "user_prompt": "05_subtitle_qa/user.md"
+    },
+    {
+      "id": "06_content_packager",
+      "system_prompt": "06_content_packager/system.md",
+      "user_prompt": "06_content_packager/user.md"
+    },
+    {
+      "id": "07_voice_director",
+      "system_prompt": "07_voice_director/system.md",
+      "user_prompt": "07_voice_director/user.md"
+    }
+  ]
+}

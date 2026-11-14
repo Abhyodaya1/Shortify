@@ -1,0 +1,531 @@
+"""FastAPI endpoints for the Personal AI YouTube Shorts Generator MVP.
+Conforms to 03_IMPLEMENTATION_SPEC.md.
+"""
+
+from __future__ import annotations
+import os
+from pathlib import Path
+from typing import Dict, Any, Optional, List
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query, status
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, Field
+
+from ..services.video_ingestion import IngestionService
+from ..services.face_tracker import FaceTrackingReframer
+from ..services.clip_selector import SmartClipSelector
+from ..services.shorts_renderer import ShortsRenderer
+from ..services.quality_assurance import QualityAssuranceEngine
+from ..services.timeline_compositor import MasterTimelineCompositor
+from ..storage.profile_store import ProfileStore
+from ..storage.dataset_store import DatasetStore, ClipFeedbackSubmission
+
+router = APIRouter(prefix="/api/v1/shorts", tags=["Personal Shorts MVP"])
+
+# In-memory session storage for active videos and clips
+ingested_videos: Dict[str, Dict[str, Any]] = {}
+discovered_clips: Dict[str, Dict[str, Any]] = {}
+face_reframer = FaceTrackingReframer()
+
+
+class IngestUrlRequest(BaseModel):
+    url: str = Field(..., description="YouTube video URL")
+
+
+class DiscoverClipsRequest(BaseModel):
+    video_id: str = Field(..., description="ID of ingested video")
+    duration_mode: str = Field(default="31s", description="'31s' or '45s'")
+    layout_mode: str = Field(default="split_screen", description="'split_screen', 'split_screen_comment', 'tweet_card', 'full_9_16', 'fit_ambient_blur'")
+    card_type: Optional[str] = Field(default=None, description="Card archetype: 'none', 'reddit_card', 'tweet_card', 'instagram_card', 'youtube_comment'")
+    background_id: Optional[str] = Field(default="minecraft_parkour", description="Background video ID")
+    video_scale_percent: int = Field(default=48, description="Main video height percent (30-80)")
+    auto_hook: bool = Field(default=False, description="Enable opening AI voiceover hook by default")
+    social_author: Optional[str] = Field(default="Motion Creator", description="Social author name")
+    social_handle: Optional[str] = Field(default="@motioncreator", description="Social handle")
+    social_badge: Optional[str] = Field(default="verified", description="Verified or currency badge")
+    social_text: Optional[str] = Field(default=None, description="Custom social / comment card text")
+    card_vertical_position: Optional[int] = Field(default=20, description="Card vertical position percent (10-85)")
+    card_width_percent: Optional[int] = Field(default=90, description="Card width scale percent (70-100)")
+    subtitle_vertical_position: Optional[int] = Field(default=75, description="Subtitle vertical position percent (10-90)")
+    subtitle_preset: Optional[str] = Field(default="bold_impact", description="Subtitle preset ID")
+    custom_active_color: Optional[str] = Field(default=None, description="Active word color hex e.g. #FFE600")
+    custom_primary_color: Optional[str] = Field(default=None, description="Non-highlighted text color hex e.g. #FFFFFF")
+    custom_font_name: Optional[str] = Field(default=None, description="Font family override e.g. Arial Black, Impact, Space Grotesk")
+    custom_animation: Optional[str] = Field(default=None, description="Animation type: word_pop, glow_pulse, fade_in, slide_up, karaoke")
+    custom_all_caps: Optional[bool] = Field(default=None, description="Whether to uppercase text")
+    custom_outline_width: Optional[float] = Field(default=None, description="Custom stroke thickness")
+    tts_voice: Optional[str] = Field(default=None, description="TTS voice override")
+
+
+class RenderClipRequest(BaseModel):
+    clip_id: str = Field(..., description="ID of selected clip candidate")
+    layout_mode: str = Field(default="split_screen", description="'split_screen', 'split_screen_comment', 'tweet_card', 'full_9_16', 'fit_ambient_blur'")
+    card_type: Optional[str] = Field(default=None, description="Card archetype: 'none', 'reddit_card', 'tweet_card', 'instagram_card', 'youtube_comment'")
+    background_id: Optional[str] = Field(default="minecraft_parkour", description="Background video ID")
+    video_scale_percent: int = Field(default=48, description="Main video height percent (30-80)")
+    enable_opening_hook: bool = Field(default=False, description="Enable AI hook voiceover")
+    opening_hook_text: Optional[str] = Field(default=None, description="Custom or approved hook text")
+    enable_ending_hook: bool = Field(default=False, description="Enable ending hook voiceover")
+    ending_hook_text: Optional[str] = Field(default=None, description="Custom ending hook text")
+    headline_text: Optional[str] = Field(default=None, description="Top visual heading")
+    tts_voice: str = Field(default="en-US-ChristopherNeural", description="Voice ID")
+    subtitle_preset: str = Field(default="mrbeast", description="'mrbeast', 'clean_minimal', 'neon_punch', 'tiktok_yellow', 'red_alert'")
+    custom_active_color: Optional[str] = Field(default=None, description="Active word hex e.g. #FFE600 or &H0000D7FF&")
+    custom_primary_color: Optional[str] = Field(default=None, description="Non-highlighted word hex e.g. #FFFFFF")
+    custom_font_name: Optional[str] = Field(default=None, description="Font family override e.g. Arial Black, Montserrat")
+    custom_animation: Optional[str] = Field(default=None, description="Animation type: word_pop, glow_pulse, fade_in, slide_up, karaoke")
+    custom_all_caps: Optional[bool] = Field(default=None, description="Force uppercase text")
+    custom_outline_width: Optional[float] = Field(default=None, description="Custom stroke thickness")
+    social_author: Optional[str] = Field(default="Motion Creator", description="Social author name")
+    social_handle: Optional[str] = Field(default="@motioncreator", description="Social handle")
+    social_badge: Optional[str] = Field(default="verified", description="Verified or currency badge")
+    social_text: Optional[str] = Field(default=None, description="Custom social / comment card text")
+    card_vertical_position: Optional[int] = Field(default=20, description="Card vertical position percent (10-85)")
+    card_width_percent: Optional[int] = Field(default=90, description="Card width scale percent (70-100)")
+    subtitle_vertical_position: Optional[int] = Field(default=75, description="Subtitle vertical position percent (10-90)")
+
+
+class BatchRenderRequest(BaseModel):
+    clip_ids: List[str] = Field(..., description="List of clip candidate IDs to render")
+    layout_mode: str = Field(default="split_screen", description="Layout mode")
+    background_id: Optional[str] = Field(default="minecraft_parkour", description="Background ID")
+    video_scale_percent: int = Field(default=48, description="Split ratio percent")
+    subtitle_preset: str = Field(default="mrbeast", description="Subtitle preset")
+    custom_font_name: Optional[str] = Field(default=None, description="Font name")
+    custom_active_color: Optional[str] = Field(default=None, description="Active word color")
+    enable_opening_hook: bool = Field(default=False, description="Opening AI voiceover hook")
+    tts_voice: str = Field(default="en-US-ChristopherNeural", description="Voice ID")
+
+
+class FastReRenderRequest(BaseModel):
+    clip_id: str = Field(..., description="ID of selected clip candidate")
+    subtitle_preset: str = Field(default="mrbeast", description="'mrbeast', 'clean_minimal', 'neon_punch', 'tiktok_yellow', 'red_alert'")
+    custom_active_color: Optional[str] = Field(default=None, description="Active word hex")
+    custom_font_name: Optional[str] = Field(default=None, description="Font family override")
+    headline_text: Optional[str] = Field(default=None, description="Updated headline")
+
+
+@router.post("/ingest-url", summary="Download YouTube video & extract transcript")
+def ingest_youtube_url(payload: IngestUrlRequest):
+    """Downloads YouTube video, captures title, duration, and extracts transcript."""
+    try:
+        video_data = IngestionService.ingest_youtube_url(payload.url)
+        vid_id = video_data["video_id"]
+        ingested_videos[vid_id] = video_data
+        return {
+            "video_id": vid_id,
+            "title": video_data["title"],
+            "duration_sec": video_data["duration_sec"],
+            "thumbnail": video_data["thumbnail"],
+            "width": video_data["width"],
+            "height": video_data["height"],
+            "cue_count": len(video_data["transcript_cues"]),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/upload-file", summary="Upload local video file")
+async def upload_local_file(file: UploadFile = File(...)):
+    """Accepts a local MP4 or MOV video file for Shorts processing."""
+    temp_dir = Path("backend/storage/uploads")
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    temp_path = temp_dir / file.filename
+
+    with open(temp_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
+    video_data = IngestionService.ingest_local_file(str(temp_path), file.filename)
+    vid_id = video_data["video_id"]
+    ingested_videos[vid_id] = video_data
+
+    return {
+        "video_id": vid_id,
+        "title": video_data["title"],
+        "duration_sec": video_data["duration_sec"],
+        "thumbnail": "",
+        "width": video_data["width"],
+        "height": video_data["height"],
+        "cue_count": len(video_data["transcript_cues"]),
+    }
+
+
+@router.post("/discover-clips", summary="Analyze video, run face tracking, and discover viral clips")
+async def discover_clips(payload: DiscoverClipsRequest):
+    """Uses Gemini AI + 21 Hook Formulas + Face Tracking to select 31s or 45s Shorts candidates."""
+    if payload.video_id not in ingested_videos:
+        raise HTTPException(status_code=404, detail="Video not found. Please ingest first.")
+
+    video = ingested_videos[payload.video_id]
+    cues = video["transcript_cues"]
+    title = video["title"]
+    filepath = video["filepath"]
+
+    # 1. Snapshot the active editorial profile for this generation job
+    active_profile = ProfileStore.get_active_profile()
+
+    # 2. AI Content & Clip Selection targeting requested duration mode
+    clips = await SmartClipSelector.discover_clips(
+        cues=cues,
+        video_title=title,
+        duration_mode=payload.duration_mode,
+        profile=active_profile,
+    )
+
+    # 3. Compute Face Tracking for each clip
+    for clip in clips:
+        crop_info = face_reframer.track_clip_faces(
+            video_filepath=filepath,
+            start_sec=clip["start_sec"],
+            end_sec=clip["end_sec"],
+            sample_fps=3.0,
+        )
+        clip["crop_data"] = crop_info
+        clip["parent_video_id"] = payload.video_id
+        clip["layout_mode"] = payload.layout_mode
+        clip["card_type"] = payload.card_type
+        clip["background_id"] = payload.background_id
+        clip["social_author"] = payload.social_author
+        clip["social_handle"] = payload.social_handle
+        clip["social_badge"] = payload.social_badge
+        clip["social_text"] = payload.social_text
+        clip["subtitle_preset"] = payload.subtitle_preset
+        clip["custom_active_color"] = payload.custom_active_color
+        clip["custom_primary_color"] = payload.custom_primary_color
+        clip["custom_font_name"] = payload.custom_font_name
+        clip["custom_animation"] = payload.custom_animation
+        clip["custom_all_caps"] = payload.custom_all_caps
+        clip["card_vertical_position"] = payload.card_vertical_position
+        clip["card_width_percent"] = payload.card_width_percent
+        clip["subtitle_vertical_position"] = payload.subtitle_vertical_position
+        discovered_clips[clip["clip_id"]] = clip
+
+    return {
+        "video_id": payload.video_id,
+        "duration_mode": payload.duration_mode,
+        "total_clips_found": len(clips),
+        "profile_snapshot": active_profile.snapshot(),
+        "clips": clips,
+    }
+
+
+def _get_bg_storage_dir() -> Path:
+    candidates = [
+        Path("backend/storage/backgrounds"),
+        Path("storage/backgrounds"),
+        Path(__file__).resolve().parent.parent.parent / "storage" / "backgrounds",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    p = candidates[0]
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+@router.get("/backgrounds", summary="List available predefined background videos")
+def list_backgrounds():
+    """Lists available predefined and uploaded background videos."""
+    import subprocess
+    bg_dir = _get_bg_storage_dir()
+    backgrounds = []
+    for p in bg_dir.glob("*.mp4"):
+        bid = p.stem
+        thumb_path = bg_dir / f"{bid}.jpg"
+        if not thumb_path.exists():
+            try:
+                subprocess.run(
+                    ["ffmpeg", "-y", "-ss", "00:00:03", "-i", str(p.resolve()), "-vframes", "1", "-q:v", "2", str(thumb_path.resolve())],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                pass
+
+        has_thumb = thumb_path.exists()
+        backgrounds.append({
+            "id": bid,
+            "name": bid.replace("_", " ").title(),
+            "filename": p.name,
+            "thumbnail_url": f"http://localhost:8000/api/v1/shorts/backgrounds/{bid}/thumbnail" if has_thumb else "",
+        })
+    return {"backgrounds": backgrounds}
+
+
+@router.get("/backgrounds/{bg_id}/thumbnail", summary="Get background video thumbnail")
+def get_background_thumbnail(bg_id: str):
+    import subprocess
+    bg_dir = _get_bg_storage_dir()
+    thumb = bg_dir / f"{bg_id}.jpg"
+    if not thumb.exists():
+        # Try extracting on the fly from the corresponding mp4
+        vid = bg_dir / f"{bg_id}.mp4"
+        if vid.exists():
+            try:
+                subprocess.run(
+                    ["ffmpeg", "-y", "-ss", "00:00:02", "-i", str(vid.resolve()), "-vframes", "1", "-q:v", "2", str(thumb.resolve())],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                pass
+    if not thumb.exists():
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
+    return FileResponse(str(thumb.resolve()), media_type="image/jpeg")
+
+
+@router.post("/upload-background", summary="Upload a custom background video")
+async def upload_background(file: UploadFile = File(...)):
+    """Uploads an additional background video to the background library."""
+    import re
+    import subprocess
+    bg_dir = Path("backend/storage/backgrounds")
+    bg_dir.mkdir(parents=True, exist_ok=True)
+    clean_stem = re.sub(r'[^a-zA-Z0-9_-]', '_', Path(file.filename).stem).lower()
+    target_path = bg_dir / f"{clean_stem}.mp4"
+    with open(target_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
+    thumb_path = bg_dir / f"{clean_stem}.jpg"
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-ss", "00:00:02", "-i", str(target_path.resolve()), "-vframes", "1", "-q:v", "2", str(thumb_path.resolve())],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
+
+    return {
+        "status": "success",
+        "id": clean_stem,
+        "name": clean_stem.replace("_", " ").title(),
+        "filename": target_path.name,
+        "thumbnail_url": f"http://localhost:8000/api/v1/shorts/backgrounds/{clean_stem}/thumbnail" if thumb_path.exists() else "",
+    }
+
+
+@router.post("/render-clip", summary="Render 9:16 vertical MP4 with face tracking, kinetic ASS & QA check")
+async def render_clip(payload: RenderClipRequest):
+    """Renders the selected clip into an MP4 file with smart reframing, kinetic typography, and deterministic QA."""
+    if payload.clip_id not in discovered_clips:
+        raise HTTPException(status_code=404, detail="Clip candidate not found.")
+
+    clip = discovered_clips[payload.clip_id]
+    parent_vid_id = clip["parent_video_id"]
+    video = ingested_videos[parent_vid_id]
+
+    output_filename = f"short_{payload.clip_id}.mp4"
+    clip_render_dir = Path("backend/storage/renders") / f"clip_{payload.clip_id}"
+    clip_render_dir.mkdir(parents=True, exist_ok=True)
+
+    # Resolve background video
+    bg_video_path = None
+    if payload.background_id and payload.background_id != "none":
+        candidate_bg = Path("backend/storage/backgrounds") / f"{payload.background_id}.mp4"
+        if candidate_bg.exists():
+            bg_video_path = str(candidate_bg.resolve())
+        else:
+            default_bg = Path("backend/storage/backgrounds/minecraft_parkour.mp4")
+            if default_bg.exists():
+                bg_video_path = str(default_bg.resolve())
+
+    report = await MasterTimelineCompositor.process_and_render_clip(
+        source_video_path=video["filepath"],
+        start_sec=clip["start_sec"],
+        end_sec=clip["end_sec"],
+        clip_id=payload.clip_id,
+        output_dir=str(clip_render_dir),
+        crop_data=clip.get("crop_data"),
+        layout_mode=payload.layout_mode,
+        card_type=payload.card_type or clip.get("card_type"),
+        background_video_path=bg_video_path,
+        video_scale_percent=payload.video_scale_percent,
+        enable_opening_hook=payload.enable_opening_hook,
+        opening_hook_text=payload.opening_hook_text or clip.get("opening_hook"),
+        enable_ending_hook=payload.enable_ending_hook,
+        ending_hook_text=payload.ending_hook_text,
+        headline_text=payload.headline_text or clip.get("visual_headline") or clip.get("title"),
+        tts_voice=payload.tts_voice,
+        subtitle_preset=payload.subtitle_preset,
+        custom_active_color=payload.custom_active_color,
+        custom_primary_color=payload.custom_primary_color,
+        custom_font_name=payload.custom_font_name,
+        custom_animation=payload.custom_animation,
+        custom_all_caps=payload.custom_all_caps,
+        custom_outline_width=payload.custom_outline_width,
+        social_author=payload.social_author,
+        social_handle=payload.social_handle,
+        social_badge=payload.social_badge,
+        social_text=payload.social_text,
+        card_vertical_position=payload.card_vertical_position,
+        card_width_percent=payload.card_width_percent,
+        subtitle_vertical_position=payload.subtitle_vertical_position,
+    )
+
+    rendered_file = report["output_files"]["final_video"]
+    public_preview_path = Path("backend/storage/renders") / output_filename
+    if Path(rendered_file).exists() and public_preview_path.resolve() != Path(rendered_file).resolve():
+        import shutil
+        shutil.copy2(rendered_file, public_preview_path)
+
+    clip["rendered_file"] = str(public_preview_path.resolve())
+    clip["render_report"] = report
+
+    packaging = report.get("packaging", {})
+    recommended_titles = packaging.get("titles", [])
+    best_title = clip.get("title", "")
+    if recommended_titles:
+        rec_idx = packaging.get("recommended_title_index", 0)
+        if rec_idx < len(recommended_titles):
+            best_title = recommended_titles[rec_idx].get("text", best_title)
+
+    mtime = int(os.path.getmtime(public_preview_path)) if public_preview_path.exists() else 0
+
+    return {
+        "status": "success",
+        "clip_id": payload.clip_id,
+        "filename": output_filename,
+        "preview_url": f"http://localhost:8000/api/v1/shorts/preview/{output_filename}?t={mtime}",
+        "download_url": f"http://localhost:8000/api/v1/shorts/download/{output_filename}",
+        "title": best_title,
+        "title_alternatives": recommended_titles,
+        "description": packaging.get("description", clip.get("description")),
+        "hashtags": packaging.get("hashtags", clip.get("hashtags", [])),
+        "tags": packaging.get("tags", []),
+        "hook_verdict": clip.get("hook_verdict", "Strong hook grounded in content"),
+        "engagement_score": clip.get("engagement_score", 90),
+        "qa_result": {
+            "passed": report.get("subtitles", {}).get("qa_status") == "pass",
+            "qa_status": report.get("subtitles", {}).get("qa_status", "pass"),
+            "issues": report.get("subtitles", {}).get("qa_issues", []),
+            "total_duration_sec": report.get("total_duration_sec"),
+            "resolution": "1080x1920",
+        },
+        "report": report,
+    }
+
+
+@router.post("/batch-render", summary="Batch render multiple selected clips")
+async def batch_render_clips(payload: BatchRenderRequest):
+    """Renders multiple clips sequentially, returning results and status (Feature 4)."""
+    results = []
+    for cid in payload.clip_ids:
+        if cid not in discovered_clips:
+            continue
+        try:
+            req = RenderClipRequest(
+                clip_id=cid,
+                layout_mode=payload.layout_mode,
+                background_id=payload.background_id,
+                video_scale_percent=payload.video_scale_percent,
+                subtitle_preset=payload.subtitle_preset,
+                custom_font_name=payload.custom_font_name,
+                custom_active_color=payload.custom_active_color,
+                enable_opening_hook=payload.enable_opening_hook,
+                tts_voice=payload.tts_voice,
+            )
+            res = await render_clip(req)
+            results.append({"clip_id": cid, "status": "success", "download_url": res["download_url"], "preview_url": res["preview_url"]})
+        except Exception as e:
+            results.append({"clip_id": cid, "status": "failed", "error": str(e)})
+    return {"total": len(results), "rendered": [r for r in results if r["status"] == "success"], "results": results}
+
+
+@router.get("/batch-download-zip", summary="Download all rendered clips in a ZIP bundle")
+def download_all_zip():
+    """Packages all rendered MP4 shorts into a single zip archive for 1-click batch download (Feature 4)."""
+    import zipfile
+    renders_dir = Path("backend/storage/renders")
+    zip_path = renders_dir / "motion_shorts_bundle.zip"
+    mp4s = list(renders_dir.glob("short_*.mp4"))
+    if not mp4s:
+        raise HTTPException(status_code=404, detail="No rendered shorts found yet.")
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in mp4s:
+            zf.write(f, arcname=f.name)
+
+    return FileResponse(str(zip_path), media_type="application/zip", filename="motion_shorts_bundle.zip")
+
+
+@router.post("/re-render-subtitles", summary="Fast 2-second subtitle re-styling without re-analyzing video")
+def fast_re_render_subtitles(payload: FastReRenderRequest):
+    clip_render_dir = Path("backend/storage/renders") / f"clip_{payload.clip_id}"
+    if not clip_render_dir.exists():
+        raise HTTPException(status_code=404, detail="Clip artifacts not found. Please render clip first.")
+
+    res = MasterTimelineCompositor.re_render_subtitles_fast(
+        clip_dir=str(clip_render_dir),
+        subtitle_preset=payload.subtitle_preset,
+        custom_active_color=payload.custom_active_color,
+        custom_primary_color=payload.custom_primary_color,
+        custom_font_name=payload.custom_font_name,
+        custom_animation=payload.custom_animation,
+        custom_all_caps=payload.custom_all_caps,
+        custom_outline_width=payload.custom_outline_width,
+        headline_text=payload.headline_text,
+    )
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("error", "Re-render failed"))
+
+    output_filename = f"short_{payload.clip_id}.mp4"
+    public_preview_path = Path("backend/storage/renders") / output_filename
+    final_file = Path(res["final_video"])
+    if final_file.exists() and public_preview_path.resolve() != final_file.resolve():
+        import shutil
+        shutil.copy2(final_file, public_preview_path)
+
+    mtime = int(os.path.getmtime(public_preview_path)) if public_preview_path.exists() else 0
+
+    return {
+        "status": "success",
+        "clip_id": payload.clip_id,
+        "filename": output_filename,
+        "preview_url": f"http://localhost:8000/api/v1/shorts/preview/{output_filename}?t={mtime}",
+        "download_url": f"http://localhost:8000/api/v1/shorts/download/{output_filename}",
+        "preset": payload.subtitle_preset,
+    }
+
+
+@router.post("/clips/{clip_id}/feedback", summary="Submit structured human review and rating")
+def submit_clip_feedback(clip_id: str, feedback: ClipFeedbackSubmission):
+    """Logs human ratings, rejection reasons, and supervised edit deltas to the dataset."""
+    if clip_id not in discovered_clips:
+        raise HTTPException(status_code=404, detail="Clip not found in active session.")
+
+    clip = discovered_clips[clip_id]
+    record = DatasetStore.record_feedback(clip, feedback)
+    return {
+        "status": "recorded",
+        "record_id": record["record_id"],
+        "approved_for_reference": feedback.approved_for_reference,
+    }
+
+
+@router.get("/dataset/export", summary="Export preferences and reference dataset in JSONL format")
+def export_dataset(dataset_type: str = Query(default="preferences", description="'preferences' or 'references'")):
+    """Exports structured editorial training and benchmark dataset."""
+    records = DatasetStore.export_dataset(dataset_type=dataset_type)
+    return {
+        "dataset_type": dataset_type,
+        "record_count": len(records),
+        "records": records,
+    }
+
+
+@router.get("/preview/{filename}", summary="Stream rendered video preview")
+def preview_short(filename: str):
+    file_path = Path("backend/storage/renders") / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(str(file_path), media_type="video/mp4")
+
+
+@router.get("/download/{filename}", summary="Download rendered MP4 Short")
+def download_short(filename: str):
+    file_path = Path("backend/storage/renders") / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(str(file_path), media_type="video/mp4", filename=filename)
