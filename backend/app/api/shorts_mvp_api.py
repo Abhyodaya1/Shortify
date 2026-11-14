@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from ..services.video_ingestion import IngestionService
+from ..services.url_security_validator import SSRFSecurityError, URLSecurityValidator
 from ..services.face_tracker import FaceTrackingReframer
 from ..services.clip_selector import SmartClipSelector
 from ..services.shorts_renderer import ShortsRenderer
@@ -120,6 +121,10 @@ def ingest_youtube_url(payload: IngestUrlRequest):
             "height": video_data["height"],
             "cue_count": len(video_data["transcript_cues"]),
         }
+    except SSRFSecurityError as e:
+        raise HTTPException(status_code=403, detail=f"Security violation: {str(e)}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid URL: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

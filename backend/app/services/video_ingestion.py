@@ -12,6 +12,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from uuid import uuid4
 import httpx
 from dotenv import load_dotenv
+from .url_security_validator import URLSecurityValidator, SSRFSecurityError
 
 load_dotenv()
 
@@ -31,25 +32,29 @@ class IngestionService:
         import yt_dlp
         from youtube_transcript_api import YouTubeTranscriptApi
 
+        # 0. Deep Multi-Layer SSRF and Protocol Validation
+        clean_url, validated_yt_id = URLSecurityValidator.validate_url(url)
+
         video_id = str(uuid4())[:8]
         out_template = str(STORAGE_UPLOADS / f"yt_{video_id}.%(ext)s")
 
-        # 1. Extract metadata and download video
+        # 1. Extract metadata and download video with extractor constraints
         ydl_opts = {
             "format": "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best",
             "outtmpl": out_template,
             "quiet": True,
             "no_warnings": True,
             "noplaylist": True,
+            "allowed_extractors": ["youtube", "youtube:tab"],
         }
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
+                info = ydl.extract_info(clean_url, download=True)
                 title = info.get("title", "YouTube Video")
                 duration = info.get("duration", 0)
                 thumbnail = info.get("thumbnail", "")
-                yt_id = info.get("id", "")
+                yt_id = info.get("id", validated_yt_id)
                 video_filepath = ydl.prepare_filename(info)
                 # In case extension changed
                 if not os.path.exists(video_filepath):
