@@ -130,7 +130,7 @@ class QualityAssuranceEngine:
             filepath,
         ]
         try:
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
             if res.returncode == 0:
                 return json.loads(res.stdout)
         except Exception:

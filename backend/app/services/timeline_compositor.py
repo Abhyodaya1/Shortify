@@ -710,10 +710,10 @@ class MasterTimelineCompositor:
                     str(main_clip_raw.resolve()),
                 ]
 
-        res_main = subprocess.run(main_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        res_main = cls._safe_run_ffmpeg(main_cmd, timeout=180)
         if res_main.returncode != 0:
             main_cmd[main_cmd.index("-c:v") + 1] = "libx264"
-            subprocess.run(main_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            cls._safe_run_ffmpeg(main_cmd, timeout=180)
 
         # Step 6B: If opening voiceover exists, render cinematic intro card with neural voice mapped to audio
         has_intro = bool(opening_audio_path and opening_audio_dur > 0 and Path(opening_audio_path).exists())
@@ -747,10 +747,10 @@ class MasterTimelineCompositor:
                     "-shortest",
                     str(intro_card_mp4.resolve()),
                 ]
-                res_intro = subprocess.run(intro_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                res_intro = cls._safe_run_ffmpeg(intro_cmd, timeout=180)
                 if res_intro.returncode != 0:
                     intro_cmd[intro_cmd.index("-c:v") + 1] = "libx264"
-                    subprocess.run(intro_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                    cls._safe_run_ffmpeg(intro_cmd, timeout=180)
 
                 inputs.extend(["-i", str(intro_card_mp4.resolve())])
                 filter_segments.append(f"[{segment_idx}:v][{segment_idx}:a]")
@@ -784,10 +784,10 @@ class MasterTimelineCompositor:
                     "-shortest",
                     str(outro_card_mp4.resolve()),
                 ]
-                res_outro = subprocess.run(outro_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                res_outro = cls._safe_run_ffmpeg(outro_cmd, timeout=180)
                 if res_outro.returncode != 0:
                     outro_cmd[outro_cmd.index("-c:v") + 1] = "libx264"
-                    subprocess.run(outro_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                    cls._safe_run_ffmpeg(outro_cmd, timeout=180)
 
                 inputs.extend(["-i", str(outro_card_mp4.resolve())])
                 filter_segments.append(f"[{segment_idx}:v][{segment_idx}:a]")
@@ -810,10 +810,10 @@ class MasterTimelineCompositor:
                 "-ac", "2",
                 str(composed_raw_path.resolve()),
             ]
-            res_concat = subprocess.run(concat_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            res_concat = cls._safe_run_ffmpeg(concat_cmd, timeout=180)
             if res_concat.returncode != 0:
                 concat_cmd[concat_cmd.index("-c:v") + 1] = "libx264"
-                subprocess.run(concat_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                cls._safe_run_ffmpeg(concat_cmd, timeout=180)
         else:
             # No opening or ending voiceover: main clip is the composed raw
             if main_clip_raw.exists():
@@ -834,10 +834,10 @@ class MasterTimelineCompositor:
             "-movflags", "+faststart",
             str(final_mp4_path.resolve()),
         ]
-        res_burn = subprocess.run(burn_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        res_burn = cls._safe_run_ffmpeg(burn_cmd, timeout=180)
         if res_burn.returncode != 0:
             burn_cmd[burn_cmd.index("-c:v") + 1] = "libx264"
-            subprocess.run(burn_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            cls._safe_run_ffmpeg(burn_cmd, timeout=180)
 
         # Verify export integrity
         final_dur = cls._measure_duration(str(final_mp4_path))
@@ -979,10 +979,10 @@ class MasterTimelineCompositor:
             "-movflags", "+faststart",
             str(final_mp4.resolve()),
         ]
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        res = cls._safe_run_ffmpeg(cmd, timeout=180)
         if res.returncode != 0:
             cmd[cmd.index("-c:v") + 1] = "libx264"
-            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            cls._safe_run_ffmpeg(cmd, timeout=180)
 
         return {
             "success": True,
@@ -992,9 +992,17 @@ class MasterTimelineCompositor:
         }
 
     @staticmethod
+    def _safe_run_ffmpeg(cmd: List[str], timeout: int = 180) -> subprocess.CompletedProcess:
+        """Executes FFmpeg with strict timeout to prevent hung worker threads."""
+        try:
+            return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"FFmpeg process timed out after {timeout} seconds: {' '.join(cmd[:4])}")
+
+    @staticmethod
     def _detect_encoder() -> str:
         try:
-            res = subprocess.run(["ffmpeg", "-encoders"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            res = subprocess.run(["ffmpeg", "-encoders"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
             if "h264_nvenc" in res.stdout:
                 return "h264_nvenc"
         except Exception:
@@ -1010,7 +1018,7 @@ class MasterTimelineCompositor:
             str(Path(video_path).resolve()),
         ]
         try:
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
             if res.returncode == 0:
                 return round(float(res.stdout.strip()), 2)
         except Exception:

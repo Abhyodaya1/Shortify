@@ -324,7 +324,10 @@ class TTSManager:
             "-c:a", "pcm_s16le",
             str(final_normalized_wav.resolve()),
         ]
-        norm_res = subprocess.run(norm_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            norm_res = subprocess.run(norm_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            norm_res = subprocess.CompletedProcess(norm_cmd, returncode=1)
         if norm_res.returncode != 0:
             # Fallback to raw output if normalization filter hit an edge-case
             if raw_output_wav.exists():
@@ -362,7 +365,7 @@ class TTSManager:
             str(Path(audio_path).resolve()),
         ]
         try:
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
             if res.returncode == 0:
                 return round(float(res.stdout.strip()), 3)
         except Exception:

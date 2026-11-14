@@ -172,7 +172,10 @@ class IngestionService:
             "-c:a", "copy",
             str(temp_audio.resolve()),
         ]
-        res = subprocess.run(fast_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            res = subprocess.run(fast_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+        except subprocess.TimeoutExpired:
+            res = subprocess.CompletedProcess(fast_cmd, returncode=1)
 
         # If copy failed or size > 24MB, re-encode to compact 32k mono AAC
         if res.returncode != 0 or not temp_audio.exists() or temp_audio.stat().st_size > 24 * 1024 * 1024:
@@ -186,7 +189,10 @@ class IngestionService:
                 "-b:a", "32k",
                 str(temp_audio_fallback.resolve()),
             ]
-            subprocess.run(compact_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                subprocess.run(compact_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+            except subprocess.TimeoutExpired:
+                raise RuntimeError("FFmpeg audio compression timed out after 120 seconds.")
             if temp_audio.exists():
                 try:
                     temp_audio.unlink()

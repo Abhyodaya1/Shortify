@@ -132,15 +132,19 @@ def ingest_youtube_url(payload: IngestUrlRequest):
 @router.post("/upload-file", summary="Upload local video file")
 async def upload_local_file(file: UploadFile = File(...)):
     """Accepts a local MP4 or MOV video file for Shorts processing."""
-    temp_dir = Path("backend/storage/uploads")
+    raw_name = Path(file.filename or "video.mp4").name
+    clean_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', raw_name)
+    temp_dir = Path("backend/storage/uploads").resolve()
     temp_dir.mkdir(parents=True, exist_ok=True)
-    temp_path = temp_dir / file.filename
+    temp_path = (temp_dir / clean_name).resolve()
+    if not temp_path.is_relative_to(temp_dir):
+        raise HTTPException(status_code=400, detail="Invalid upload filename")
 
     with open(temp_path, "wb") as f:
         content = await file.read()
         f.write(content)
 
-    video_data = IngestionService.ingest_local_file(str(temp_path), file.filename)
+    video_data = IngestionService.ingest_local_file(str(temp_path), clean_name)
     vid_id = video_data["video_id"]
     ingested_videos[vid_id] = video_data
 
@@ -243,6 +247,7 @@ def list_backgrounds():
                     ["ffmpeg", "-y", "-ss", "00:00:03", "-i", str(p.resolve()), "-vframes", "1", "-q:v", "2", str(thumb_path.resolve())],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
+                    timeout=15,
                 )
             except Exception:
                 pass
@@ -257,26 +262,32 @@ def list_backgrounds():
     return {"backgrounds": backgrounds}
 
 
-@router.get("/backgrounds/{bg_id}/thumbnail", summary="Get background video thumbnail")
+@router.get("/backgrounds/{bg_id:path}/thumbnail", summary="Get background video thumbnail")
 def get_background_thumbnail(bg_id: str):
     import subprocess
-    bg_dir = _get_bg_storage_dir()
-    thumb = bg_dir / f"{bg_id}.jpg"
+    if "\0" in bg_id or "/" in bg_id or "\\" in bg_id or ".." in bg_id:
+        raise HTTPException(status_code=400, detail="Invalid background ID")
+    clean_bg_id = Path(bg_id).name
+    bg_dir = _get_bg_storage_dir().resolve()
+    thumb = (bg_dir / f"{clean_bg_id}.jpg").resolve()
+    if not thumb.is_relative_to(bg_dir):
+        raise HTTPException(status_code=400, detail="Path traversal attempt detected")
     if not thumb.exists():
         # Try extracting on the fly from the corresponding mp4
-        vid = bg_dir / f"{bg_id}.mp4"
-        if vid.exists():
+        vid = (bg_dir / f"{clean_bg_id}.mp4").resolve()
+        if vid.exists() and vid.is_relative_to(bg_dir):
             try:
                 subprocess.run(
-                    ["ffmpeg", "-y", "-ss", "00:00:02", "-i", str(vid.resolve()), "-vframes", "1", "-q:v", "2", str(thumb.resolve())],
+                    ["ffmpeg", "-y", "-ss", "00:00:02", "-i", str(vid), "-vframes", "1", "-q:v", "2", str(thumb)],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
+                    timeout=15,
                 )
             except Exception:
                 pass
-    if not thumb.exists():
+    if not thumb.exists() or not thumb.is_file():
         raise HTTPException(status_code=404, detail="Thumbnail not found")
-    return FileResponse(str(thumb.resolve()), media_type="image/jpeg")
+    return FileResponse(str(thumb), media_type="image/jpeg")
 
 
 @router.post("/upload-background", summary="Upload a custom background video")
@@ -284,10 +295,13 @@ async def upload_background(file: UploadFile = File(...)):
     """Uploads an additional background video to the background library."""
     import re
     import subprocess
-    bg_dir = Path("backend/storage/backgrounds")
+    bg_dir = Path("backend/storage/backgrounds").resolve()
     bg_dir.mkdir(parents=True, exist_ok=True)
-    clean_stem = re.sub(r'[^a-zA-Z0-9_-]', '_', Path(file.filename).stem).lower()
-    target_path = bg_dir / f"{clean_stem}.mp4"
+    clean_stem = re.sub(r'[^a-zA-Z0-9_-]', '_', Path(file.filename or "bg.mp4").stem).lower()
+    target_path = (bg_dir / f"{clean_stem}.mp4").resolve()
+    if not target_path.is_relative_to(bg_dir):
+        raise HTTPException(status_code=400, detail="Invalid background filename")
+
     with open(target_path, "wb") as f:
         content = await file.read()
         f.write(content)
@@ -295,9 +309,10 @@ async def upload_background(file: UploadFile = File(...)):
     thumb_path = bg_dir / f"{clean_stem}.jpg"
     try:
         subprocess.run(
-            ["ffmpeg", "-y", "-ss", "00:00:02", "-i", str(target_path.resolve()), "-vframes", "1", "-q:v", "2", str(thumb_path.resolve())],
+            ["ffmpeg", "-y", "-ss", "00:00:02", "-i", str(target_path), "-vframes", "1", "-q:v", "2", str(thumb_path)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            timeout=15,
         )
     except Exception:
         pass
@@ -520,17 +535,29 @@ def export_dataset(dataset_type: str = Query(default="preferences", description=
     }
 
 
-@router.get("/preview/{filename}", summary="Stream rendered video preview")
+@router.get("/preview/{filename:path}", summary="Stream rendered video preview")
 def preview_short(filename: str):
-    file_path = Path("backend/storage/renders") / filename
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(str(file_path), media_type="video/mp4")
+    if "\0" in filename or "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Path traversal attempt detected")
+    clean_filename = Path(filename).name
+    base_dir = Path("backend/storage/renders").resolve()
+    target_path = (base_dir / clean_filename).resolve()
+    if not target_path.is_relative_to(base_dir):
+        raise HTTPException(status_code=400, detail="Path traversal attempt detected")
+    if not target_path.is_file():
+        raise HTTPException(status_code=404, detail="Requested video file does not exist")
+    return FileResponse(str(target_path), media_type="video/mp4")
 
 
-@router.get("/download/{filename}", summary="Download rendered MP4 Short")
+@router.get("/download/{filename:path}", summary="Download rendered MP4 Short")
 def download_short(filename: str):
-    file_path = Path("backend/storage/renders") / filename
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(str(file_path), media_type="video/mp4", filename=filename)
+    if "\0" in filename or "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Path traversal attempt detected")
+    clean_filename = Path(filename).name
+    base_dir = Path("backend/storage/renders").resolve()
+    target_path = (base_dir / clean_filename).resolve()
+    if not target_path.is_relative_to(base_dir):
+        raise HTTPException(status_code=400, detail="Path traversal attempt detected")
+    if not target_path.is_file():
+        raise HTTPException(status_code=404, detail="Requested video file does not exist")
+    return FileResponse(str(target_path), media_type="video/mp4", filename=clean_filename)

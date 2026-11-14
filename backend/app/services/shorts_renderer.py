@@ -83,13 +83,19 @@ class ShortsRenderer:
         ]
 
         try:
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=180)
             if res.returncode != 0:
                 print(f"Primary render with {encoder} failed ({res.stderr[-300:]}), falling back to libx264...")
                 cls._render_fallback(
                     source_video_path, start_sec, duration, crop_w, crop_h,
                     crop_data.get("optimal_crop_x", 0), ass_path, output_path, target_width, target_height
                 )
+        except subprocess.TimeoutExpired:
+            print("Primary render timed out after 180s, falling back to libx264...")
+            cls._render_fallback(
+                source_video_path, start_sec, duration, crop_w, crop_h,
+                crop_data.get("optimal_crop_x", 0), ass_path, output_path, target_width, target_height
+            )
         except Exception as e:
             print(f"Exception during render: {e}, falling back to CPU...")
             cls._render_fallback(
@@ -263,7 +269,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     @classmethod
     def _detect_encoder(cls) -> str:
         try:
-            res = subprocess.run(["ffmpeg", "-encoders"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            res = subprocess.run(["ffmpeg", "-encoders"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
             if "h264_nvenc" in res.stdout:
                 return "h264_nvenc"
         except Exception:
@@ -289,4 +295,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             "-b:a", "192k",
             str(out.resolve()),
         ]
-        subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=180)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Fallback CPU render timed out after 180 seconds.")
