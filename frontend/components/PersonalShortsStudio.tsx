@@ -155,6 +155,10 @@ interface ClipCandidate {
   title: string;
   description: string;
   hashtags: string[];
+  tags?: string[];
+  title_alternatives?: Array<{ text: string; angle?: string; accuracy_note?: string }>;
+  metadata_warnings?: string[];
+  rationale?: string;
   spoken_text: string;
   visual_headline?: string;
   key_hooks?: string[];
@@ -692,8 +696,8 @@ export const PersonalShortsStudio: React.FC = () => {
         ? data.preview_url
         : `http://localhost:8000${data.preview_url}`;
 
-      setClips((prev) =>
-        prev.map((c) =>
+      setClips((prev) => {
+        const nextList = prev.map((c) =>
           c.clip_id === clip.clip_id
             ? {
                 ...c,
@@ -701,10 +705,17 @@ export const PersonalShortsStudio: React.FC = () => {
                 rendered_video_url: finalDownloadUrl,
                 preview_url: finalPreviewUrl,
                 qa_result: data.qa_result,
+                title: data.title || c.title,
+                title_alternatives: data.title_alternatives || c.title_alternatives,
+                description: data.description || c.description,
+                hashtags: data.hashtags || c.hashtags,
+                tags: data.tags || c.tags,
               }
             : c
-        )
-      );
+        );
+        persistClipsState(nextList);
+        return nextList;
+      });
 
       if (editingClip && editingClip.clip_id === clip.clip_id) {
         setEditingClip((prev) => (prev ? { ...prev, rendered_video_url: finalDownloadUrl } : null));
@@ -784,6 +795,11 @@ export const PersonalShortsStudio: React.FC = () => {
           rendered_video_url: finalDownloadUrl,
           preview_url: finalPreviewUrl,
           qa_result: data.qa_result,
+          title: data.title || updatedDraft.title,
+          title_alternatives: data.title_alternatives || updatedDraft.title_alternatives,
+          description: data.description || updatedDraft.description,
+          hashtags: data.hashtags || updatedDraft.hashtags,
+          tags: data.tags || updatedDraft.tags,
         };
 
         const finalizedList = clips.map((c) =>
@@ -2688,6 +2704,32 @@ export const PersonalShortsStudio: React.FC = () => {
         onScheduled={(job) => {
           alert(`Successfully scheduled Short: "${job.title}"!`);
           setActiveMainView("scheduler");
+        }}
+        onMetadataUpdate={(updatedFields) => {
+          if (!schedulingClip) return;
+          const updatedClips = clips.map((c) =>
+            c.clip_id === schedulingClip.clip_id
+              ? {
+                  ...c,
+                  title: updatedFields.title,
+                  description: updatedFields.description,
+                  tags: updatedFields.tags,
+                  title_alternatives: updatedFields.title_alternatives || c.title_alternatives,
+                }
+              : c
+          );
+          persistClipsState(updatedClips);
+          setSchedulingClip((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  title: updatedFields.title,
+                  description: updatedFields.description,
+                  tags: updatedFields.tags,
+                  title_alternatives: updatedFields.title_alternatives || prev.title_alternatives,
+                }
+              : null
+          );
         }}
       />
     </div>

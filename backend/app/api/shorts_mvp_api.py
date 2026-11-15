@@ -17,7 +17,7 @@ from ..services.face_tracker import FaceTrackingReframer
 from ..services.clip_selector import SmartClipSelector
 from ..services.shorts_renderer import ShortsRenderer
 from ..services.quality_assurance import QualityAssuranceEngine
-from ..services.timeline_compositor import MasterTimelineCompositor
+from ..services.timeline_compositor import MasterTimelineCompositor, ContentPackagerService
 from ..storage.profile_store import ProfileStore
 from ..storage.dataset_store import DatasetStore, ClipFeedbackSubmission
 from ..storage.session_store import SessionStore, SessionVideosProxy, SessionClipsProxy
@@ -392,10 +392,6 @@ async def render_clip(payload: RenderClipRequest):
         import shutil
         shutil.copy2(rendered_file, public_preview_path)
 
-    clip["rendered_file"] = str(public_preview_path.resolve())
-    clip["render_report"] = report
-    discovered_clips[payload.clip_id] = clip
-
     packaging = report.get("packaging", {})
     recommended_titles = packaging.get("titles", [])
     best_title = clip.get("title", "")
@@ -403,6 +399,19 @@ async def render_clip(payload: RenderClipRequest):
         rec_idx = packaging.get("recommended_title_index", 0)
         if rec_idx < len(recommended_titles):
             best_title = recommended_titles[rec_idx].get("text", best_title)
+
+    desc = packaging.get("description") or clip.get("description", "")
+    hashtags = packaging.get("hashtags") or clip.get("hashtags", [])
+    tags = packaging.get("tags") or clip.get("tags", [])
+
+    clip["rendered_file"] = str(public_preview_path.resolve())
+    clip["render_report"] = report
+    clip["title"] = best_title
+    clip["title_alternatives"] = recommended_titles
+    clip["description"] = desc
+    clip["hashtags"] = hashtags
+    clip["tags"] = tags
+    discovered_clips[payload.clip_id] = clip
 
     mtime = int(os.path.getmtime(public_preview_path)) if public_preview_path.exists() else 0
 
@@ -414,9 +423,9 @@ async def render_clip(payload: RenderClipRequest):
         "download_url": f"http://localhost:8000/api/v1/shorts/download/{output_filename}",
         "title": best_title,
         "title_alternatives": recommended_titles,
-        "description": packaging.get("description", clip.get("description")),
-        "hashtags": packaging.get("hashtags", clip.get("hashtags", [])),
-        "tags": packaging.get("tags", []),
+        "description": desc,
+        "hashtags": hashtags,
+        "tags": tags,
         "hook_verdict": clip.get("hook_verdict", "Strong hook grounded in content"),
         "engagement_score": clip.get("engagement_score", 90),
         "qa_result": {
@@ -509,6 +518,71 @@ def fast_re_render_subtitles(payload: FastReRenderRequest):
         "preview_url": f"http://localhost:8000/api/v1/shorts/preview/{output_filename}?t={mtime}",
         "download_url": f"http://localhost:8000/api/v1/shorts/download/{output_filename}",
         "preset": payload.subtitle_preset,
+    }
+
+
+@router.get("/clips/{clip_id}/metadata", summary="Get or generate AI YouTube metadata for a clip")
+@router.post("/clips/{clip_id}/metadata", summary="Generate or regenerate AI YouTube metadata for a clip")
+def get_or_generate_clip_metadata(
+    clip_id: str,
+    regenerate: bool = Query(default=False, description="Force regenerate even if already present"),
+):
+    """Generates transcript-grounded YouTube metadata: title alternatives, description, tags, and hashtags."""
+    if clip_id not in discovered_clips:
+        raise HTTPException(status_code=404, detail="Clip not found in active session.")
+
+    clip = discovered_clips[clip_id]
+
+    if not regenerate and clip.get("title") and clip.get("tags") and clip.get("hashtags") and clip.get("title_alternatives"):
+        return {
+            "status": "success",
+            "clip_id": clip_id,
+            "title": clip.get("title"),
+            "title_alternatives": clip.get("title_alternatives", []),
+            "description": clip.get("description", ""),
+            "hashtags": clip.get("hashtags", []),
+            "tags": clip.get("tags", []),
+            "source": "cached_session",
+        }
+
+    # Extract text from transcript segment or cues
+    cues = clip.get("cues") or clip.get("subtitles") or []
+    transcript_text = clip.get("transcript_segment") or " ".join([c.get("text", "") for c in cues if isinstance(c, dict)]).strip()
+    central_idea = clip.get("central_idea") or clip.get("headline") or clip.get("title") or "Key Creator Insight"
+    opening_hook = clip.get("opening_hook") or clip.get("visual_headline") or ""
+
+    pkg = ContentPackagerService.package_content(
+        clip_id=clip_id,
+        transcript=transcript_text,
+        central_idea=central_idea,
+        opening_hook=opening_hook,
+    )
+
+    titles = pkg.get("titles", [])
+    rec_idx = pkg.get("recommended_title_index", 0)
+    best_title = titles[rec_idx].get("text") if titles and rec_idx < len(titles) else clip.get("title", "Insightful Short")
+    desc = pkg.get("description", clip.get("description", ""))
+    hashtags = pkg.get("hashtags", clip.get("hashtags", []))
+    tags = pkg.get("tags", clip.get("tags", []))
+
+    clip["title"] = best_title
+    clip["title_alternatives"] = titles
+    clip["description"] = desc
+    clip["hashtags"] = hashtags
+    clip["tags"] = tags
+    discovered_clips[clip_id] = clip
+
+    return {
+        "status": "success",
+        "clip_id": clip_id,
+        "title": best_title,
+        "title_alternatives": titles,
+        "description": desc,
+        "hashtags": hashtags,
+        "tags": tags,
+        "metadata_warnings": pkg.get("metadata_warnings", []),
+        "rationale": pkg.get("rationale", ""),
+        "source": "ai_generated",
     }
 
 

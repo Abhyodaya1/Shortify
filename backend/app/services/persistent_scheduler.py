@@ -213,6 +213,8 @@ class PersistentScheduler:
             "job_id": job_id,
             "clip_id": clip_id,
             "title": title,
+            "description": description,
+            "tags": tags,
             "scheduled_time": scheduled_time,
             "status": "scheduled",
             "visibility": visibility,

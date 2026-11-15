@@ -1,8 +1,26 @@
 "use client";
 
-import React, { useState } from "react";
-import { Calendar, Globe, Lock, EyeOff, X, Rocket } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import {
+  Calendar,
+  Globe,
+  Lock,
+  EyeOff,
+  X,
+  Rocket,
+  Sparkles,
+  RefreshCw,
+  CheckCircle2,
+  Tag,
+  AlertTriangle,
+} from "lucide-react";
 import { YoutubeIcon } from "./YoutubeIcon";
+
+interface TitleAlternative {
+  text: string;
+  angle?: string;
+  accuracy_note?: string;
+}
 
 interface ScheduleModalProps {
   isOpen: boolean;
@@ -10,6 +28,12 @@ interface ScheduleModalProps {
   clip: any;
   currentChannel: any;
   onScheduled: (job: any) => void;
+  onMetadataUpdate?: (updatedFields: {
+    title: string;
+    description: string;
+    tags: string[];
+    title_alternatives?: TitleAlternative[];
+  }) => void;
 }
 
 export function ScheduleModal({
@@ -18,6 +42,7 @@ export function ScheduleModal({
   clip,
   currentChannel,
   onScheduled,
+  onMetadataUpdate,
 }: ScheduleModalProps) {
   const [scheduledDate, setScheduledDate] = useState<string>(() => {
     const d = new Date();
@@ -25,19 +50,107 @@ export function ScheduleModal({
     return d.toISOString().slice(0, 16);
   });
   const [visibility, setVisibility] = useState<"public" | "unlisted" | "private">("unlisted");
-  const [title, setTitle] = useState<string>(clip?.headline || "Viral Short");
-  const [description, setDescription] = useState<string>(() => {
-    return `${clip?.headline || "Exciting Moment"}\n\nProduced with Motion Video Agent.\n\n#Shorts #CreatorGrowth #Viral`;
-  });
-  const [tags, setTags] = useState<string>("Shorts, Creator, Growth, HighPerformance, Storytelling");
+  const [title, setTitle] = useState<string>("");
+  const [titleAlternatives, setTitleAlternatives] = useState<TitleAlternative[]>([]);
+  const [description, setDescription] = useState<string>("");
+  const [tags, setTags] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingMetadata, setIsLoadingMetadata] = useState(false);
+  const [metadataSource, setMetadataSource] = useState<string | null>(null);
+  const [metadataWarnings, setMetadataWarnings] = useState<string[]>([]);
+
+  // Function to fetch or force-regenerate transcript-grounded AI metadata from backend
+  const fetchAiMetadata = async (forceRegenerate: boolean = false) => {
+    if (!clip?.clip_id) return;
+    setIsLoadingMetadata(true);
+    try {
+      const url = `http://localhost:8000/api/v1/shorts/clips/${clip.clip_id}/metadata${
+        forceRegenerate ? "?regenerate=true" : ""
+      }`;
+      const res = await fetch(url, { method: "POST" });
+      if (!res.ok) {
+        throw new Error(`Failed to load AI metadata (${res.status})`);
+      }
+      const data = await res.json();
+      const newTitle = data.title || clip?.headline || "Viral Short";
+      const newDesc = data.description || "";
+      const newTagsList: string[] = Array.isArray(data.tags)
+        ? data.tags
+        : typeof data.tags === "string"
+        ? data.tags.split(",").map((t: string) => t.trim())
+        : [];
+      const newTagsStr = newTagsList.join(", ");
+      const alts: TitleAlternative[] = data.title_alternatives || [];
+
+      setTitle(newTitle);
+      setDescription(newDesc);
+      setTags(newTagsStr);
+      setTitleAlternatives(alts);
+      setMetadataSource(data.source || (forceRegenerate ? "ai_generated" : "cached_session"));
+      setMetadataWarnings(data.metadata_warnings || []);
+
+      onMetadataUpdate?.({
+        title: newTitle,
+        description: newDesc,
+        tags: newTagsList,
+        title_alternatives: alts,
+      });
+    } catch (err: any) {
+      console.warn("AI metadata fetch fallback:", err.message);
+      // Fallback safely to clip properties
+      const fallbackTitle = clip.title || clip.headline || "Viral Short";
+      const fallbackDesc =
+        clip.description ||
+        `${fallbackTitle}\n\n#Shorts #CreatorGrowth`;
+      const fallbackTags = Array.isArray(clip.tags) ? clip.tags.join(", ") : clip.tags || "";
+      setTitle(fallbackTitle);
+      setDescription(fallbackDesc);
+      setTags(fallbackTags);
+    } finally {
+      setIsLoadingMetadata(false);
+    }
+  };
+
+  // Re-synchronize and hydrate metadata when clip or modal open state changes
+  useEffect(() => {
+    if (!isOpen || !clip) return;
+
+    // Reset default schedule time to 2 hours from now
+    const d = new Date();
+    d.setHours(d.getHours() + 2);
+    setScheduledDate(d.toISOString().slice(0, 16));
+
+    // If clip already has rich AI metadata with tags and alternatives, hydrate directly
+    const hasRichMeta =
+      Boolean(clip.title) &&
+      Array.isArray(clip.tags) &&
+      clip.tags.length > 0 &&
+      Array.isArray(clip.title_alternatives) &&
+      clip.title_alternatives.length > 0;
+
+    if (hasRichMeta) {
+      setTitle(clip.title);
+      setDescription(clip.description || "");
+      setTags(clip.tags.join(", "));
+      setTitleAlternatives(clip.title_alternatives || []);
+      setMetadataSource("cached_session");
+      setIsLoadingMetadata(false);
+    } else {
+      // Auto-fetch transcript-grounded metadata from backend
+      fetchAiMetadata(false);
+    }
+  }, [clip?.clip_id, isOpen]);
 
   if (!isOpen || !clip) return null;
 
   const handleSubmit = async () => {
     setIsSubmitting(true);
     try {
-      const tagList = tags.split(",").map((t) => t.trim()).filter(Boolean);
+      const tagList = tags
+        .split(",")
+        .map((t) => t.trim().replace(/^#/, ""))
+        .filter(Boolean);
+
       const res = await fetch("http://localhost:8000/api/v1/youtube/schedule", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -68,9 +181,11 @@ export function ScheduleModal({
     }
   };
 
+  const parsedTagCount = tags.split(",").map((t) => t.trim()).filter(Boolean).length;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-      <div className="w-full max-w-xl bg-surface-container-lowest border-2 border-primary shadow-[5px_5px_0px_#111111] overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="w-full max-w-xl bg-surface-container-lowest border-2 border-primary shadow-[5px_5px_0px_#111111] overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
         <div className="p-4 border-b-2 border-primary flex items-center justify-between bg-surface-container text-primary">
           <div className="flex items-center gap-3">
@@ -82,12 +197,13 @@ export function ScheduleModal({
                 <h3 className="font-headline font-bold text-sm uppercase tracking-tight text-primary">
                   Schedule YouTube Short
                 </h3>
-                <span className="font-mono text-[10px] px-1.5 py-0.2 bg-[#d5eb45] border border-primary font-bold">
-                  AUTOPILOT
+                <span className="font-mono text-[10px] px-1.5 py-0.2 bg-[#d5eb45] border border-primary font-bold flex items-center gap-1">
+                  <Sparkles className="w-2.5 h-2.5" />
+                  <span>AI GROUNDED</span>
                 </span>
               </div>
               <p className="font-mono text-[11px] text-outline mt-0.5">
-                Automated publishing via persistent background queue
+                Automated publishing with Role 06 search-optimized metadata
               </p>
             </div>
           </div>
@@ -118,33 +234,117 @@ export function ScheduleModal({
                 </span>
               </div>
             </div>
-            <span className="font-mono text-[10px] px-2 py-0.5 border border-primary bg-[#d5eb45] font-bold uppercase">
-              ACTIVE
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => fetchAiMetadata(true)}
+                disabled={isLoadingMetadata}
+                className="inline-flex items-center gap-1 px-2 py-1 border border-primary bg-surface-container hover:bg-[#d5eb45] text-primary font-mono text-[10px] font-bold uppercase transition-all shadow-[1px_1px_0px_#111111]"
+              >
+                <RefreshCw className={`w-3 h-3 ${isLoadingMetadata ? "animate-spin" : ""}`} />
+                <span>{isLoadingMetadata ? "Generating..." : "Regenerate AI"}</span>
+              </button>
+              <span className="font-mono text-[10px] px-2 py-0.5 border border-primary bg-[#d5eb45] font-bold uppercase">
+                ACTIVE
+              </span>
+            </div>
           </div>
 
-          {/* Title with Character Linting */}
-          <div className="space-y-1">
+          {/* AI Metadata Notice */}
+          {isLoadingMetadata ? (
+            <div className="p-2.5 border border-primary bg-surface-container font-mono text-[11px] text-primary flex items-center gap-2 animate-pulse">
+              <RefreshCw className="w-3.5 h-3.5 animate-spin text-primary" />
+              <span>Generating transcript-grounded title, SEO tags &amp; description...</span>
+            </div>
+          ) : metadataWarnings.length > 0 ? (
+            <div className="p-2.5 border border-amber-600 bg-amber-50 font-mono text-[11px] text-amber-900 flex items-start gap-2">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+              <span>{metadataWarnings.join(". ")}</span>
+            </div>
+          ) : null}
+
+          {/* Title with Character & Mobile Safe Linting */}
+          <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="font-mono text-xs font-bold text-primary uppercase">
-                Short Title (Packaging Linter)
+                Short Title (AI Generated)
               </label>
-              <span className={`font-mono text-[10px] font-bold px-2 py-0.5 border border-primary ${
-                title.length <= 40
-                  ? "bg-[#d5eb45] text-primary"
+              <span
+                className={`font-mono text-[10px] font-bold px-2 py-0.5 border border-primary ${
+                  title.length <= 40
+                    ? "bg-[#d5eb45] text-primary"
+                    : title.length <= 60
+                    ? "bg-surface-container text-primary"
+                    : "bg-red-200 text-red-900"
+                }`}
+              >
+                {title.length} chars{" "}
+                {title.length <= 40
+                  ? "• Mobile Safe (<40)"
                   : title.length <= 60
-                  ? "bg-surface-container text-primary"
-                  : "bg-red-200 text-red-900"
-              }`}>
-                {title.length} chars {title.length <= 40 ? "• Mobile Safe" : title.length <= 60 ? "• Desktop Only" : "• Truncated"}
+                  ? "• Optimal (<60)"
+                  : "• May Truncate"}
               </span>
             </div>
             <input
               type="text"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                onMetadataUpdate?.({
+                  title: e.target.value,
+                  description,
+                  tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+                  title_alternatives: titleAlternatives,
+                });
+              }}
+              placeholder="e.g. Stop Making This Editing Mistake | #Shorts"
               className="w-full px-3 py-2 border-2 border-primary bg-surface-container-lowest font-mono text-xs text-primary focus:outline-none focus:shadow-[2px_2px_0px_#111111]"
             />
+
+            {/* Alternative Titles Selector */}
+            {titleAlternatives.length > 0 && (
+              <div className="space-y-1 pt-1">
+                <span className="font-mono text-[10px] uppercase font-bold text-outline block">
+                  Select Alternative Title (Role 06 Packager):
+                </span>
+                <div className="grid grid-cols-1 gap-1">
+                  {titleAlternatives.map((alt, idx) => {
+                    const isSelected = title === alt.text;
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          setTitle(alt.text);
+                          onMetadataUpdate?.({
+                            title: alt.text,
+                            description,
+                            tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+                            title_alternatives: titleAlternatives,
+                          });
+                        }}
+                        className={`text-left px-2.5 py-1.5 border text-[11px] font-mono transition-all flex items-center justify-between gap-2 ${
+                          isSelected
+                            ? "bg-[#d5eb45] text-primary border-primary font-bold shadow-[1px_1px_0px_#111111]"
+                            : "bg-surface-container-lowest text-primary border-outline/30 hover:border-primary hover:bg-surface-container"
+                        }`}
+                      >
+                        <span className="truncate flex-1">
+                          <span className="uppercase text-[9px] px-1 py-0.2 mr-1.5 border border-primary/40 bg-surface-container">
+                            {alt.angle || `Alt ${idx + 1}`}
+                          </span>
+                          {alt.text}
+                        </span>
+                        {isSelected && (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-primary shrink-0" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Schedule Date & Time */}
@@ -208,29 +408,62 @@ export function ScheduleModal({
             </div>
           </div>
 
-          {/* Description & Tags */}
+          {/* Description & Hashtags */}
           <div className="space-y-1">
-            <label className="font-mono text-xs font-bold text-primary uppercase block">
-              Description &amp; Hashtags
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="font-mono text-xs font-bold text-primary uppercase block">
+                Description &amp; Hashtags
+              </label>
+              <span className="font-mono text-[10px] text-outline">
+                Transcript grounded • Hashtags included
+              </span>
+            </div>
             <textarea
-              rows={3}
+              rows={4}
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              onChange={(e) => {
+                setDescription(e.target.value);
+                onMetadataUpdate?.({
+                  title,
+                  description: e.target.value,
+                  tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+                  title_alternatives: titleAlternatives,
+                });
+              }}
+              placeholder="Summary and key takeaway with relevant #Shorts hashtags..."
               className="w-full p-2.5 border-2 border-primary bg-surface-container-lowest font-mono text-xs text-primary focus:outline-none focus:shadow-[2px_2px_0px_#111111] leading-relaxed"
             />
           </div>
 
+          {/* SEO Tags */}
           <div className="space-y-1">
-            <label className="font-mono text-xs font-bold text-primary uppercase block">
-              SEO Tags (Comma-separated)
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="font-mono text-xs font-bold text-primary uppercase flex items-center gap-1">
+                <Tag className="w-3 h-3 text-primary" />
+                <span>YouTube Search Tags (Up to 15 Substantive Keywords)</span>
+              </label>
+              <span className="font-mono text-[10px] font-bold text-outline">
+                {parsedTagCount} / 15 tags
+              </span>
+            </div>
             <input
               type="text"
               value={tags}
-              onChange={(e) => setTags(e.target.value)}
+              onChange={(e) => {
+                setTags(e.target.value);
+                onMetadataUpdate?.({
+                  title,
+                  description,
+                  tags: e.target.value.split(",").map((t) => t.trim()).filter(Boolean),
+                  title_alternatives: titleAlternatives,
+                });
+              }}
+              placeholder="Shorts, YouTubeShorts, VideoTips, Editing, Creator"
               className="w-full px-3 py-2 border-2 border-primary bg-surface-container-lowest font-mono text-xs text-primary focus:outline-none focus:shadow-[2px_2px_0px_#111111]"
             />
+            <p className="font-mono text-[10px] text-outline">
+              Targeted search keywords (comma-separated, without #). Distinct from hashtags in the description.
+            </p>
           </div>
         </div>
 
@@ -248,8 +481,8 @@ export function ScheduleModal({
             </button>
             <button
               onClick={handleSubmit}
-              disabled={isSubmitting}
-              className="px-4 py-1.5 border-2 border-primary bg-primary text-on-primary font-mono text-xs uppercase font-bold tracking-wider shadow-[2px_2px_0px_#d5eb45] hover:bg-[#d5eb45] hover:text-primary transition-all flex items-center gap-1.5"
+              disabled={isSubmitting || isLoadingMetadata}
+              className="px-4 py-1.5 border-2 border-primary bg-primary text-on-primary font-mono text-xs uppercase font-bold tracking-wider shadow-[2px_2px_0px_#d5eb45] hover:bg-[#d5eb45] hover:text-primary transition-all flex items-center gap-1.5 disabled:opacity-50"
             >
               <Rocket className="w-3.5 h-3.5 text-[#d5eb45]" />
               <span>{isSubmitting ? "Scheduling..." : "Confirm Schedule"}</span>

@@ -10,6 +10,7 @@ Orchestrates Phase 1 MVP end-to-end:
 
 from __future__ import annotations
 import os
+import re
 import json
 import subprocess
 from pathlib import Path
@@ -23,6 +24,7 @@ from .tts_engine import TTSManager
 from .kinetic_subtitle_compiler import KineticSubtitleCompiler, SubtitleQAService
 from .card_overlay_generator import CardOverlayGenerator
 from .youtube_intelligence_service import YouTubeIntelligenceService
+from .cache_service import ContentCacheService
 from ..models.editorial_profile import EditorialProfile
 from ..storage.profile_store import ProfileStore
 
@@ -76,23 +78,28 @@ class ContentPackagerService:
         for k, v in data.items():
             user_prompt = user_prompt.replace(f"{{{{{k}}}}}", str(v))
 
+        # Multi-dimensional cache lookup (preserves LLM quota across identical content)
+        cache_key = ContentCacheService.compute_packaging_cache_key(
+            transcript_text=transcript or central_idea,
+            central_idea=central_idea,
+            opening_hook=opening_hook,
+            channel_niche=channel_niche,
+            model_id=cls.MODEL_FAST,
+        )
+        cached_pkg = ContentCacheService.get(cache_key)
+        if cached_pkg is not None and isinstance(cached_pkg, dict):
+            cached_pkg["clip_id"] = clip_id
+            if output_dir:
+                out_p = Path(output_dir) / "packaging_metadata.json"
+                out_p.parent.mkdir(parents=True, exist_ok=True)
+                with open(out_p, "w", encoding="utf-8") as f:
+                    json.dump(cached_pkg, f, indent=2)
+            return cached_pkg
+
         api_key = os.getenv("GROQ_API_KEY")
-        if not api_key:
-            package = {
-                "clip_id": clip_id,
-                "titles": [
-                    {"text": f"Why This Mistake Kills Your Views", "angle": "curiosity-driven", "accuracy_note": "Direct from transcript"},
-                    {"text": f"Stop Doing This When Editing", "angle": "actionable", "accuracy_note": "Direct advice"},
-                    {"text": f"The Creator Secret Nobody Explains", "angle": "insider-truth", "accuracy_note": "Accurate takeaway"},
-                ],
-                "recommended_title_index": 0,
-                "description": f"Master this essential strategy to immediately improve your video retention and engagement.\n\n#shorts #creator #editing",
-                "tags": ["shorts", "creator tips", "video editing", "retention"],
-                "hashtags": ["#shorts", "#creator", "#viralvideo"],
-                "metadata_warnings": [],
-                "rationale": "High-clarity, non-clickbait titles grounded strictly in the clip's thesis.",
-            }
-        else:
+        package: Optional[Dict[str, Any]] = None
+
+        if api_key:
             payload = {
                 "model": cls.MODEL_FAST,
                 "messages": [
@@ -109,28 +116,72 @@ class ContentPackagerService:
                 with httpx.Client(timeout=25.0) as client:
                     resp = client.post(cls.GROQ_API_URL, json=payload, headers=headers)
                 if resp.status_code == 200:
-                    package = resp.json()["choices"][0]["message"]["content"]
-                    if isinstance(package, str):
-                        package = json.loads(package)
-                else:
-                    package = {
-                        "clip_id": clip_id,
-                        "titles": [{"text": "Essential Creator Strategy", "angle": "direct"}],
-                        "recommended_title_index": 0,
-                        "description": "Essential takeaway from the video.",
-                        "tags": ["shorts", "creators"],
-                        "hashtags": ["#shorts"],
-                    }
-            except Exception as e:
-                package = {
-                    "clip_id": clip_id,
-                    "titles": [{"text": "Essential Creator Strategy", "angle": "direct"}],
-                    "recommended_title_index": 0,
-                    "description": "Essential takeaway from the video.",
-                    "tags": ["shorts"],
-                    "hashtags": ["#shorts"],
-                    "error": str(e),
-                }
+                    raw_content = resp.json()["choices"][0]["message"]["content"]
+                    if isinstance(raw_content, str):
+                        package = json.loads(raw_content)
+            except Exception:
+                package = None
+
+        # Deterministic transcript-grounded generation when offline or API call failed
+        if not package or not isinstance(package, dict) or not package.get("titles"):
+            clean_hook = opening_hook.strip('"\'.') if opening_hook else ""
+            if not clean_hook and transcript:
+                first_sent = transcript.split(".")[0].strip('"\'.')
+                clean_hook = first_sent[:60] if len(first_sent) > 5 else transcript[:60]
+            if not clean_hook:
+                clean_hook = central_idea[:60].strip('"\'.') if central_idea else "Key Creator Insight"
+
+            # Extract substantive nouns/verbs for targeted keyword tags
+            topic_words = [w for w in re.findall(r"\b[A-Za-z]{4,}\b", transcript or central_idea) if w.lower() not in {
+                "this", "that", "there", "about", "would", "could", "should", "their", "where", "which",
+                "being", "having", "these", "those", "because", "every", "really", "going", "doing"
+            }]
+            raw_topic = central_idea if (central_idea and central_idea != "High-impact creator video insights") else (
+                " ".join(topic_words[:3]).title() or "Video Strategy"
+            )
+
+            title1 = f"{clean_hook[:55]} | #Shorts" if clean_hook else f"{raw_topic[:55]} | #Shorts"
+            title2 = f"The Truth About {raw_topic}"[:60]
+            title3 = f"Why Most People Get {raw_topic} Wrong"[:60]
+
+            # Targeted SEO tags (substantive entity keywords, plain strings, no #)
+            tags = ["Shorts", "YouTubeShorts", "CreatorEconomy", "VideoStrategy"]
+            for tw in topic_words[:12]:
+                cap_w = tw.title()
+                if cap_w not in tags:
+                    tags.append(cap_w)
+            tags = tags[:15]
+
+            # Hashtags (3-5 relevant hashtags with #)
+            topic_slug = re.sub(r'[^a-zA-Z0-9]', '', raw_topic.title())[:18]
+            hashtags = ["#Shorts", "#YouTubeShorts", f"#{topic_slug or 'Insights'}", "#Education", "#Creator"]
+
+            takeaway_quote = transcript[:160].strip() if transcript else clean_hook
+            description = (
+                f"{clean_hook}.\n\n"
+                f"Key Takeaway:\n"
+                f"\"{takeaway_quote}...\"\n\n"
+                f"What do you think? Drop a comment below!\n\n"
+                f"{' '.join(hashtags)}"
+            )
+
+            package = {
+                "clip_id": clip_id,
+                "titles": [
+                    {"text": title1, "angle": "benefit-led", "accuracy_note": "Grounded in opening thesis"},
+                    {"text": title2, "angle": "curiosity-driven", "accuracy_note": "Focuses on central premise"},
+                    {"text": title3, "angle": "contrarian", "accuracy_note": "Educational contrarian angle"},
+                ],
+                "recommended_title_index": 0,
+                "description": description,
+                "tags": tags,
+                "hashtags": hashtags,
+                "metadata_warnings": [],
+                "rationale": "High-clarity metadata grounded deterministically in spoken transcript cues and opening thesis.",
+            }
+
+        # Cache generated package
+        ContentCacheService.set(cache_key, "packaging", package)
 
         # Enrich titles with advisory lint heuristics from YouTube Creator Skills Engine
         for title_entry in package.get("titles", []):

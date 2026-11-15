@@ -129,6 +129,25 @@ class ContentCacheService:
         return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
     @classmethod
+    def compute_packaging_cache_key(
+        cls,
+        transcript_text: str,
+        central_idea: str = "",
+        opening_hook: str = "",
+        channel_niche: str = "",
+        model_id: str = "qwen/qwen3.8-27b",
+        prompt_version: str = "1.0.0",
+        schema_version: str = "1.0.0",
+    ) -> str:
+        """Computes deterministic cache key for AI YouTube content packaging and SEO metadata."""
+        transcript_sha = hashlib.sha256(transcript_text.strip().encode("utf-8")).hexdigest()
+        raw_key = (
+            f"packaging:{transcript_sha}:{central_idea.strip()}:{opening_hook.strip()}:{channel_niche.strip()}:"
+            f"{model_id}:{prompt_version}:{schema_version}"
+        )
+        return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+
+    @classmethod
     def clear(cls, cache_type: Optional[str] = None) -> int:
         """Clears all or type-specific entries from cache, returning deleted count."""
         cls.init_db()

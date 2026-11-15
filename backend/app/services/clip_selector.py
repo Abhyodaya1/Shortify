@@ -159,10 +159,12 @@ class SmartClipSelector:
                 "hard_rejection_reasons": hard_rejections,
                 "human_review_required": human_review_required,
                 "title": f"#{idx + 1} {clean_headline}",
+                "title_alternatives": content_pkg.get("title_alternatives", []),
                 "title_lint_advisory": YouTubeIntelligenceService.lint_title(clean_headline),
                 "dead_air_advisory": YouTubeIntelligenceService.analyze_dead_air(cand["cues"], floor=1.2),
                 "description": content_pkg["description"],
                 "hashtags": content_pkg["hashtags"],
+                "tags": content_pkg.get("tags", []),
                 "pinned_comment": content_pkg["pinned_comment"],
                 "enable_opening_hook": False,  # Default clean start without prepended voiceover
                 "subtitles": [
@@ -466,30 +468,58 @@ class SmartClipSelector:
         topic = " ".join(topic_words)
         central_idea = text[:120].strip() + "..."
 
-        if visual_headline and visual_headline.strip():
-            title = f"{visual_headline.strip('\".,')} | #Shorts"
+        clean_h = visual_headline.strip('\".,') if visual_headline else clean_hook
+        if clean_h:
+            title = f"{clean_h} | #Shorts"
         else:
             title = f"{clean_hook} | #Shorts"
 
         if len(title) > 90:
             title = f"{title[:75]}... #Shorts"
 
+        # Generate targeted, transcript-grounded SEO tags
+        seo_meta = YouTubeIntelligenceService.generate_seo_metadata(
+            topic=topic or video_title,
+            headline=clean_h
+        )
+        tags = list(seo_meta.get("tags", ["Shorts", "YouTubeShorts", "VideoTips", "CreatorEconomy"]))
+        # Extract specific substantive nouns/verbs from spoken transcript
+        words_list = [w for w in re.findall(r"\b[A-Za-z]{4,}\b", text) if w.lower() not in {
+            "this", "that", "there", "about", "would", "could", "should", "their", "where", "which", "being", "having"
+        }]
+        for w in words_list[:8]:
+            wt = w.title()
+            if wt not in tags:
+                tags.append(wt)
+        tags = tags[:15]
+
+        # Transcript-derived hashtags (separate from tags)
+        clean_topic_tag = re.sub(r'[^a-zA-Z0-9]', '', topic.title())[:20]
+        hashtags = ["#Shorts", "#YouTubeShorts", f"#{clean_topic_tag or 'Insights'}", "#Education", "#Creator"]
+
         description = (
             f"{clean_hook}.\n\n"
             f"Key Takeaway from {video_title}:\n"
             f"\"{text[:160]}...\"\n\n"
             f"Did you know this? Drop a comment below!\n\n"
-            f"#Shorts #YouTubeShorts #Knowledge #Productivity #Creator"
+            f"{' '.join(hashtags)}"
         )
-        hashtags = ["#Shorts", "#YouTubeShorts", "#Viral", "#Education", "#Creator"]
         pinned_comment = f"What is your biggest takeaway from this? Let us know in the comments!"
+
+        title_alternatives = [
+            {"text": title.replace(" | #Shorts", ""), "angle": "curiosity-driven", "accuracy_note": "Grounded in opening thesis"},
+            {"text": f"{clean_hook[:60]}", "angle": "actionable", "accuracy_note": "Direct hook quote"},
+            {"text": f"Why Most People Misunderstand {topic.title()}"[:60], "angle": "contrarian", "accuracy_note": "Educational angle"},
+        ]
 
         return {
             "topic": topic,
             "central_idea": central_idea,
             "title": title,
+            "title_alternatives": title_alternatives,
             "description": description,
             "hashtags": hashtags,
+            "tags": tags,
             "pinned_comment": pinned_comment,
         }
 
