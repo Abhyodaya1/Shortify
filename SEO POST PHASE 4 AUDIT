@@ -1,0 +1,439 @@
+# SHORTIFY — POST-PHASE-4 CODE AUDIT, AI SEO COMPLETION & MVP FINALIZATION
+
+## Role
+
+Act as a principal full-stack engineer, AI product engineer, and software auditor with 15+ years of experience building production-grade video automation platforms.
+
+You are working directly inside the existing Shortify repository.
+
+Your responsibility is to inspect the **actual source code, runtime behavior, API data flow, and frontend integration**, identify what remains incomplete after Phase 4, and implement and verify the missing functionality.
+
+**Do not treat Git commits, commit messages, checkboxes, documentation, or previous completion reports as evidence that a feature works.**
+
+The current application has a working pipeline. Preserve it.
+
+---
+
+## 1. Primary issue — AI-generated YouTube metadata is missing
+
+The attached screenshot shows the current Schedule YouTube Short modal.
+
+It currently displays:
+
+- Title: `Viral Short`
+- Description: `Produced with Motion Video Agent.`
+- SEO tags: `Shorts, Creator, Growth, HighPerformance, Storytelling`
+
+This is not acceptable as the final behavior.
+
+When a Short has been generated, Shortify should intelligently suggest:
+
+1. A compelling, relevant YouTube title.
+2. A properly written YouTube description.
+3. Relevant hashtags.
+4. Targeted YouTube SEO tags/keywords.
+5. Optional alternative title suggestions, if supported without disrupting the existing UI.
+
+These suggestions must be based on the **actual selected Short, its transcript, its timestamps, and available contextual evidence**.
+
+They must not be generic templates or hardcoded fallback content presented as AI-generated results.
+
+### Required metadata-generation behavior
+
+Trace the complete existing data flow:
+
+`Video ingestion → Whisper transcription → Clip candidate selection → Selected Short → Editorial intelligence → Metadata generation → Scheduling modal → YouTube upload`
+
+Find exactly where metadata generation is:
+
+- Missing.
+- Not connected to the existing LLM pipeline.
+- Generated but discarded.
+- Stored but not returned by the API.
+- Returned by the API but not mapped into frontend state.
+- Overwritten by frontend defaults.
+- Not refreshed when a different Short is selected.
+
+Do not assume the problem is frontend-only.
+
+### Title generation
+
+Generate titles that:
+
+- Reflect the actual content of the Short.
+- Communicate a compelling reason to watch.
+- Avoid misleading clickbait.
+- Use important concepts and keywords naturally.
+- Are readable on mobile.
+- Remain within YouTube's 100-character title limit.
+- Prefer concise titles, with a soft recommendation around 40–60 characters.
+- Do not invent events, claims, names, or statistics.
+
+Generate multiple candidates when the existing architecture supports it, then select a recommended title.
+
+### Description generation
+
+Generate a description that:
+
+- Opens with a compelling summary in the first 120 characters.
+- Accurately explains what the Short contains.
+- Uses important transcript-derived search terms naturally.
+- Includes 3–5 relevant hashtags, including `#Shorts`.
+- Avoids generic promotional filler.
+- Does not invent links, credentials, references, or factual claims.
+- Does not repeat the title unnecessarily.
+
+### SEO tags
+
+Generate up to 15 targeted keywords or phrases based on:
+
+- Transcript entities.
+- Main subject.
+- Specific concepts discussed.
+- Relevant names and terminology.
+- Search intent.
+- Context of the selected Short.
+
+Reject generic filler tags such as `Creator`, `Growth`, `Viral`, and `HighPerformance` unless they are genuinely relevant.
+
+Do not confuse YouTube hashtags in the description with the separate comma-separated tags field. They are different metadata fields.
+
+### Grounding and validation
+
+Reuse the existing transcript-grounding and editorial validation mechanisms wherever possible.
+
+The metadata must be traceable to the selected Short's transcript.
+
+If a claim depends on visual content rather than speech, do not fabricate visual evidence. Use existing visual verification flags where applicable.
+
+If the transcript is unavailable, incomplete, or too short:
+
+- Show an honest generation status.
+- Do not pretend generic defaults are AI-generated.
+- Allow the user to edit metadata manually.
+- Offer retry only where it makes sense.
+
+---
+
+## 2. Inspect the actual codebase before modifying anything
+
+Start by understanding the repository structure and identifying the actual implementation.
+
+Inspect at least:
+
+### Backend
+
+- `backend/app/services/editorial_orchestrator.py`
+- `backend/app/services/youtube_intelligence_service.py`
+- `backend/app/services/kinetic_subtitle_compiler.py`
+- `backend/app/services/timeline_compositor.py`
+- `backend/app/services/tts_engine.py`
+- Relevant prompt packs and Pydantic schemas.
+- Shorts generation and clip-selection API routes.
+- YouTube scheduling and publishing API routes.
+- SQLite models and persistence services.
+- Existing caching implementation.
+- Relevant tests.
+
+### Frontend
+
+Locate and inspect:
+
+- Schedule YouTube Short modal/component.
+- Metadata form state.
+- Selected clip/session state.
+- API client and response types.
+- Any existing metadata-generation controls.
+- Form initialization and default values.
+- Schedule submission payload.
+
+Do not assume these paths or component names are exact. Discover the real files first.
+
+### Trace the seven LLM roles
+
+Identify what each existing role actually does, where it is invoked, and whether any role already generates titles, hooks, summaries, or packaging metadata.
+
+Do not introduce an eighth LLM role if an existing role or service can perform the task cleanly.
+
+Reuse the existing Groq integration, model configuration, structured-output patterns, prompt versioning, and cache infrastructure.
+
+Do not add another LLM provider or unnecessary API dependency.
+
+---
+
+## 3. Implement the missing end-to-end metadata workflow
+
+The expected workflow:
+
+1. User selects a generated Short.
+2. Backend retrieves the correct transcript segment and relevant clip context.
+3. Existing editorial intelligence generates title candidates, description, hashtags, and tags.
+4. Output is validated against the selected transcript.
+5. Validated metadata is returned through the existing or appropriately extended API.
+6. Frontend receives the metadata and populates the scheduling form.
+7. User can edit every field.
+8. User confirms scheduling.
+9. The exact edited values are persisted and passed to the YouTube publishing service.
+
+Important: The metadata must belong to the selected Short, not the original long video as a whole.
+
+### Data integrity requirements
+
+- Associate generated metadata with a stable clip/session identifier.
+- Ensure switching between Shorts cannot display another clip's metadata.
+- Avoid race conditions when metadata requests overlap.
+- Preserve manually edited values when the user edits them.
+- Do not overwrite user edits with a late API response.
+- Persist metadata when appropriate so reopening a scheduling session does not unnecessarily regenerate it.
+- Reuse caching only when the full generation context matches.
+- Invalidate cached metadata when relevant transcript, clip boundaries, prompt version, model, or generation settings change.
+
+### Frontend behavior
+
+The scheduling form should:
+
+- Display a loading state while AI metadata is being generated.
+- Populate title, description, hashtags, and tags once valid results arrive.
+- Clearly distinguish generated suggestions from manually edited values.
+- Allow users to edit all fields.
+- Provide a retry/regenerate action if generation fails.
+- Never silently replace valid metadata with generic defaults.
+- Preserve the current design system and layout.
+
+Do not redesign the scheduling modal or change its visual identity unnecessarily.
+
+---
+
+## 4. Audit everything after Phase 4
+
+Rev 3 ends at Phase 4. Do not invent a claim that later phases were already completed.
+
+Create a code-backed audit of remaining MVP work.
+
+Inspect the actual implementation and runtime behavior of:
+
+### A. Creator intelligence
+
+- Are the deterministic creator skills actually invoked in the generation workflow?
+- Are their results used appropriately?
+- Is title linting advisory rather than destructive?
+- Are dead-air recommendations context-aware?
+- Are hook scores available to the editorial selection process?
+- Are the SEO principles connected to actual metadata generation?
+- Are manual-only skills kept out of the normal generation path?
+
+### B. Transcript-grounded editorial output
+
+- Do hooks and titles reference actual transcript moments?
+- Are timestamps valid for the selected clip?
+- Are transcript claims checked deterministically?
+- Are visual claims flagged when they cannot be verified from speech?
+- Can invalid model output be recovered safely?
+
+### C. Content packaging
+
+- Is the final Short's metadata generated from the final selected clip?
+- Are titles, descriptions, hashtags, and tags distinct fields?
+- Are descriptions useful rather than generic?
+- Are metadata values preserved between generation and scheduling?
+- Are upload payloads correctly mapped to YouTube API fields?
+
+### D. Publishing and scheduling
+
+- Does the scheduling form use the correct selected channel?
+- Are local time and timezone conversions correct?
+- Are visibility settings correctly mapped?
+- Are quota checks enforced?
+- Are retries and upload failures handled safely?
+- Does the persistent scheduler recover jobs after restart?
+
+### E. Session persistence and caching
+
+- Does a backend restart preserve clip sessions?
+- Does metadata remain associated with the correct clip?
+- Are cache keys complete?
+- Can a style-only change reuse transcription and editorial results?
+- Can an actual transcript or clip change invalidate stale metadata?
+
+### F. Rendering and output quality
+
+- Does the generated MP4 pass FFprobe validation?
+- Are resolution, aspect ratio, duration, frame rate, and audio valid?
+- Are subtitles synchronized?
+- Are captions readable within Shorts safe areas?
+- Does the renderer retain its safe fallback?
+- Does rendering still work on the existing Windows laptop configuration?
+
+### G. Audio and copyright
+
+- Are background tracks actually licensed for their intended use?
+- Are creator-provided files handled safely?
+- Are trend recommendations clearly advisory?
+- Is commercial Shorts audio left for native YouTube app selection where required?
+- Do not treat Minecraft or other gameplay audio as automatically royalty-free.
+
+---
+
+## 5. Work from actual code, not Git history
+
+This is a strict requirement.
+
+For every claimed feature:
+
+1. Locate its implementation.
+2. Inspect the actual function and its callers.
+3. Trace its data through the API.
+4. Verify frontend integration.
+5. Run a meaningful test.
+6. Record evidence.
+
+A Git commit is only a checkpoint. It is not proof of implementation or completion.
+
+Search for:
+
+- Hardcoded metadata.
+- Placeholder strings.
+- Generic default titles.
+- Static SEO tags.
+- Default descriptions.
+- Mock metadata responses.
+- Unused AI services.
+- Dead API endpoints.
+- Disconnected frontend controls.
+- Metadata generated but never persisted.
+- Fields that are silently overwritten.
+- TODO/FIXME markers in critical workflow paths.
+
+Do not simply add another AI service if an existing one already performs the work.
+
+---
+
+## 6. Tests and acceptance criteria
+
+Add or update tests covering the actual end-to-end metadata workflow.
+
+At minimum, verify:
+
+1. A selected Short with a transcript produces non-generic metadata.
+2. Generated metadata is relevant to the transcript.
+3. Title length is valid.
+4. Description contains an appropriate opening and relevant hashtags.
+5. SEO tags are relevant and not generic filler.
+6. Missing transcript is handled honestly.
+7. LLM failure does not crash scheduling.
+8. Switching clips does not leak metadata across clips.
+9. Late responses do not overwrite manual edits.
+10. Editing metadata changes the actual scheduling payload.
+11. Scheduling persists the edited values.
+12. Reopening a session restores the correct metadata.
+13. Cache invalidation works when transcript or generation context changes.
+
+Use deterministic mocked LLM responses for unit tests, but also perform at least one real integration test when API credentials and network access are available.
+
+Do not claim real LLM integration was tested if only mocks were used.
+
+Run the existing regression suite as well. Do not remove or weaken tests to obtain a passing result.
+
+---
+
+## 7. Execution protocol
+
+Work incrementally.
+
+### Step 1 — Audit
+
+Inspect the source code and produce:
+
+`SHORTIFY_POST_PHASE4_CODE_AUDIT.md`
+
+Include:
+
+- Actual file paths and functions inspected.
+- Existing behavior.
+- Missing or disconnected functionality.
+- Root cause of generic scheduling metadata.
+- Features that are implemented and verified.
+- Features that exist only partially.
+- Features that are missing.
+- Tests and evidence.
+
+Do not stop at Git history or documentation.
+
+### Step 2 — Implement
+
+Fix the root cause of the missing AI-generated metadata.
+
+Prioritize:
+
+1. Transcript-to-metadata generation.
+2. Backend API integration.
+3. Frontend state integration.
+4. Scheduling payload integrity.
+5. Tests and regression checks.
+
+Then address other confirmed post-Phase-4 gaps according to severity.
+
+### Step 3 — Verify
+
+Run the relevant backend tests, frontend checks, and regression tests.
+
+Inspect actual runtime behavior of the scheduling modal.
+
+Verify that the title, description, hashtags, and SEO tags are generated from the selected Short.
+
+### Step 4 — Report
+
+Create:
+
+`SHORTIFY_POST_PHASE4_IMPLEMENTATION_REPORT.md`
+
+For each issue, report:
+
+- Original problem.
+- Root cause.
+- Files changed.
+- Actual code change.
+- Tests executed.
+- Test results.
+- Remaining limitations.
+
+Clearly distinguish:
+
+- Implemented and tested.
+- Implemented but not integration-tested.
+- Partially implemented.
+- Not implemented.
+
+---
+
+## 8. Non-negotiable constraints
+
+- Preserve the existing Shortify architecture.
+- Preserve the current UI and visual design.
+- Do not rewrite the video pipeline.
+- Do not break existing endpoints or scheduling workflows.
+- Do not remove existing working features.
+- Do not add Supabase, Redis, Docker, or cloud infrastructure.
+- Keep SQLite and local-first operation.
+- Reuse the existing LLM provider and model configuration.
+- Keep resource usage appropriate for Windows 11, 8 GB RAM, and RTX 3050 4 GB VRAM.
+- Never expose API keys, OAuth tokens, or secrets.
+- Do not introduce plaintext token fallbacks.
+- Do not claim success based on commit messages.
+- Do not create meaningless commits just to mark work complete.
+
+If a change risks breaking an existing working workflow, isolate it and validate before proceeding.
+
+---
+
+## 9. Final acceptance condition
+
+The most important user-visible acceptance test is:
+
+**When I generate a Short and open Schedule YouTube Short, I should see a meaningful AI-generated title, a transcript-grounded description, relevant hashtags, and targeted SEO tags for that exact Short.**
+
+I should not see generic placeholder content unless generation genuinely failed, in which case the application must communicate that failure honestly.
+
+The metadata must survive editing, scheduling, and session restoration.
+
+Start by auditing the actual repository now. Do not ask me to approve another plan before investigating. Do not report completion until the source code, API flow, frontend behavior, and tests support the claim.

@@ -1,0 +1,213 @@
+# ADDENDUM — SHORTIFY PHASE-BY-PHASE IMPLEMENTATION AUDIT (PHASE 3 → PHASE 13)
+
+## 1. Critical change in execution scope
+
+Do not treat Phase 4 as the end of the entire Shortify development roadmap.
+
+The task is now to audit and complete the implementation from **Phase 3 through Phase 13**, with particular attention to the possibility that Phases 5–13 have not been implemented.
+
+The previous optimization plan's Phase 0–4 roadmap is not sufficient evidence that the entire product roadmap has been completed.
+
+Your responsibility is to establish the actual implementation status of every phase, based on source code and runtime behavior.
+
+## 2. Required execution order
+
+Follow this exact order:
+
+### Stage A — Re-verify Phase 3
+
+Audit Phase 3 Tasks 7 and 8 against actual code.
+
+**Phase 3 — Task 7: Unified YouTube Creator Skills Engine**
+
+Verify:
+- Actual integration of title linting.
+- Actual hook scoring integration.
+- Actual dead-air detection integration.
+- Actual swipe/outlier calculations.
+- Whether these helpers are invoked in the real generation pipeline.
+- Whether their results influence clip selection and editorial decisions.
+- Whether heuristics remain advisory where required.
+- Whether manual-only skills remain manual-only.
+
+**Phase 3 — Task 8: Session Clip Persistence**
+
+Verify:
+- SQLite persistence of ingested videos.
+- SQLite persistence of clip candidates.
+- Session-to-clip associations.
+- Backend restart recovery.
+- Correct restoration in the frontend.
+- No stale or cross-session clip data.
+- Correct handling of deleted or missing video files.
+
+Do not accept the existence of a service or database table as proof. Trace the actual read/write operations and test the complete workflow.
+
+Produce a Phase 3 status table:
+
+| Task | Claimed status | Actual code status | Runtime verified | Missing work |
+|---|---|---|---|---|
+
+### Stage B — Independently verify Phase 4
+
+Do not accept the Phase 4 completion claims in the documentation without verification.
+
+Run the actual regression suite and inspect:
+- Test discovery and test count.
+- Passing and failing tests.
+- Skipped tests and their reasons.
+- Mock-only tests versus actual integration tests.
+- Frontend build and type checking.
+- Existing workflow regressions.
+- Security and persistence regression tests.
+- Rendering and scheduling behavior.
+
+Resolve discrepancies such as the plan claiming 20 test modules in one section and 13 modules in another.
+
+Do not weaken tests, remove assertions, or change test expectations merely to make the suite pass.
+
+Produce a Phase 4 verification report with reproducible evidence.
+
+### Stage C — Discover the original Phases 5–13 specifications
+
+Before implementing anything from Phase 5 onward:
+
+1. Search the complete repository for all roadmap documents.
+2. Inspect README files, implementation plans, TODO documents, issue descriptions, architecture documents, prompts, and phase-specific specifications.
+3. Search for references to Phase 5, Phase 6, Phase 7, Phase 8, Phase 9, Phase 10, Phase 11, Phase 12, and Phase 13.
+4. Identify the original intended deliverables and dependencies of each phase.
+5. Compare each deliverable with actual source code and runtime behavior.
+
+Do not assume the phases are sequentially implemented just because Git history contains commits.
+
+If the original roadmap is not present:
+- Report that the specifications for Phases 5–13 could not be located.
+- Search for other project documentation that may contain their requirements.
+- Do not invent phase objectives and claim they were part of the original plan.
+- Create a separate proposed scope only for genuinely missing product requirements, clearly labeling it as proposed rather than original.
+
+### Stage D — Audit and complete Phases 5–13
+
+For every discovered phase, perform the following:
+
+1. Extract its original requirements.
+2. Locate the corresponding implementation.
+3. Trace its frontend, backend, API, storage, and service integrations.
+4. Identify placeholder implementations, disconnected code, mock-only implementations, and missing functionality.
+5. Reproduce failures where possible.
+6. Assign an implementation status.
+7. Fix confirmed incomplete or broken functionality.
+8. Add meaningful regression tests.
+9. Verify the result through actual runtime behavior.
+
+Use this status classification:
+
+- **IMPLEMENTED & VERIFIED:** Actual implementation exists and its behavior has been tested.
+- **IMPLEMENTED, NOT VERIFIED:** Code exists, but runtime or integration verification is missing.
+- **PARTIALLY IMPLEMENTED:** Some requirements work, while others are incomplete.
+- **PLACEHOLDER / MOCK:** UI, API, or service exists without the intended functional implementation.
+- **NOT IMPLEMENTED:** No meaningful implementation exists.
+- **BLOCKED:** Cannot proceed because a dependency, credential, specification, or external service is unavailable.
+
+Never mark a phase complete based only on a commit, documentation checkbox, class name, API route, or UI component.
+
+## 3. Important product functionality: AI metadata generation
+
+The scheduling metadata issue described in the main prompt is a mandatory deliverable, regardless of which original phase contains it.
+
+The selected Short must receive:
+- An AI-generated, transcript-grounded title.
+- An accurate and useful description.
+- Relevant hashtags.
+- Targeted SEO tags.
+- Correct persistence and scheduling integration.
+
+Do not postpone this fix merely because its original phase number is unclear.
+
+Trace the entire data flow from the final selected Short to the scheduling form and YouTube upload payload.
+
+## 4. Phase audit matrix
+
+Create:
+
+`SHORTIFY_PHASE_3_TO_13_IMPLEMENTATION_AUDIT.md`
+
+Include a matrix like this:
+
+| Phase | Original requirements located | Source files inspected | Actual status | Runtime verified | Remaining work |
+|---|---|---|---|---|---|
+| Phase 3 | Yes/No | Actual paths | Status | Yes/No | Findings |
+| Phase 4 | Yes/No | Actual paths | Status | Yes/No | Findings |
+| Phase 5 | Yes/No | Actual paths | Status | Yes/No | Findings |
+| Phase 6 | Yes/No | Actual paths | Status | Yes/No | Findings |
+| Phase 7 | Yes/No | Actual paths | Status | Yes/No | Findings |
+| Phase 8 | Yes/No | Actual paths | Status | Yes/No | Findings |
+| Phase 9 | Yes/No | Actual paths | Status | Yes/No | Findings |
+| Phase 10 | Yes/No | Actual paths | Status | Yes/No | Findings |
+| Phase 11 | Yes/No | Actual paths | Status | Yes/No | Findings |
+| Phase 12 | Yes/No | Actual paths | Status | Yes/No | Findings |
+| Phase 13 | Yes/No | Actual paths | Status | Yes/No | Findings |
+
+For each phase, also document:
+- Intended functionality.
+- Existing implementation.
+- Exact missing components.
+- Dependencies.
+- Root causes.
+- Files requiring changes.
+- Tests required.
+- Actual verification evidence.
+
+## 5. Implementation priority
+
+After the audit, prioritize work in this order:
+
+1. Broken existing functionality and data integrity.
+2. Incomplete Phase 3 functionality.
+3. Phase 4 regression and security failures.
+4. Missing AI-generated title, description, hashtags, and SEO tags.
+5. Incomplete original Phase 5–13 deliverables, ordered by dependencies and severity.
+6. UI polish only where an existing feature cannot be used correctly.
+
+Do not spend time redesigning already-working screens.
+
+## 6. Do not stop after writing another report
+
+The goal is not merely to produce a roadmap.
+
+After the audit:
+- Implement confirmed missing functionality.
+- Fix broken integrations.
+- Complete the relevant tests.
+- Verify actual end-to-end behavior.
+- Update the phase audit with evidence.
+
+If a task is blocked by missing credentials or an unavailable external service, implement and test the parts that can be completed locally, and report the precise blocker.
+
+Do not stop after Phase 4 simply because the previous Rev 3 document ends there.
+
+## 7. Final deliverables
+
+Produce these documents:
+
+1. `SHORTIFY_PHASE_3_TO_13_IMPLEMENTATION_AUDIT.md`
+2. `SHORTIFY_POST_PHASE4_IMPLEMENTATION_REPORT.md`
+3. `SHORTIFY_REMAINING_WORK_AND_BLOCKERS.md`
+
+The reports must distinguish original roadmap requirements from proposed improvements.
+
+## 8. Final acceptance condition
+
+I want an honest answer to these questions:
+
+- Is Phase 3 actually complete?
+- Is Phase 4 actually complete?
+- What was implemented in Phases 5–13?
+- What exists only as a placeholder or incomplete integration?
+- Which original requirements remain unfinished?
+- What has now been fixed?
+- What can I verify by running the application?
+
+**The objective is to bring Shortify to genuine completion—not to make the Git history or documentation look complete.**
+
+Continue working from actual source code, preserve the existing working architecture, and do not declare completion until the relevant functionality has been tested.
