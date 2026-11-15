@@ -122,7 +122,9 @@ export function ScheduleModal({
         cleanDesc.includes("Key Takeaway from") ||
         cleanDesc.includes("Key Takeaway:") ||
         cleanDesc.includes("Did you know this? Drop a comment below!") ||
-        cleanDesc.includes("#Knowledge #Productivity")
+        cleanDesc.includes("#Knowledge #Productivity") ||
+        cleanDesc.includes("Discover the production technique that makes this hook stick") ||
+        cleanDesc.includes("We break down why the repetition works so effectively")
       ) {
         cleanDesc = `${cleanTitle}.\n\nAn unforgettable highlight with dynamic rhythm and energy.\n\n#Shorts #YouTubeShorts #Trending`;
       }
@@ -156,22 +158,24 @@ export function ScheduleModal({
     d.setHours(d.getHours() + 2);
     setScheduledDate(d.toISOString().slice(0, 16));
 
-    // Detect if current clip description is stale legacy boilerplate
+    // Detect if current clip description is stale legacy boilerplate or category mismatch
     const isStaleDesc =
       !clip.description ||
       clip.description.includes("Key Takeaway from") ||
       clip.description.includes("Key Takeaway:") ||
       clip.description.includes("Did you know this? Drop a comment below!") ||
-      clip.description.includes("#Knowledge #Productivity");
+      clip.description.includes("#Knowledge #Productivity") ||
+      clip.description.includes("Discover the production technique that makes this hook stick") ||
+      clip.description.includes("We break down why the repetition works so effectively");
 
-    // If clip already has clean rich AI metadata with tags and alternatives, hydrate directly
+    // If clip already has clean rich AI metadata with 5 title candidates, hydrate directly
     const hasRichMeta =
       !isStaleDesc &&
       Boolean(clip.title) &&
       Array.isArray(clip.tags) &&
       clip.tags.length >= 4 &&
       Array.isArray(clip.title_alternatives) &&
-      clip.title_alternatives.length > 0;
+      clip.title_alternatives.length >= 5;
 
     if (hasRichMeta) {
       setTitle(clip.title);
@@ -503,7 +507,7 @@ export function ScheduleModal({
                   title_alternatives: titleAlternatives,
                 });
               }}
-              placeholder="Shorts, YouTubeShorts, VideoTips, Editing, Creator"
+              placeholder="e.g. Tenacious D, Baby One More Time, Kung Fu Panda 4, Live Performance, Rock Cover"
               className="w-full px-3 py-2 border-2 border-primary bg-surface-container-lowest font-mono text-xs text-primary focus:outline-none focus:shadow-[2px_2px_0px_#111111]"
             />
             <p className="font-mono text-[10px] text-outline">

@@ -25,6 +25,7 @@ from .kinetic_subtitle_compiler import KineticSubtitleCompiler, SubtitleQAServic
 from .card_overlay_generator import CardOverlayGenerator
 from .youtube_intelligence_service import YouTubeIntelligenceService
 from .cache_service import ContentCacheService
+from .skill_runtime import YouTubeSkillRuntime
 from ..models.editorial_profile import EditorialProfile
 from ..storage.profile_store import ProfileStore
 
@@ -50,42 +51,55 @@ class ContentPackagerService:
         opening_hook: str = "",
         ending_hook: str = "",
         video_title: str = "",
+        start_time: float = 0.0,
+        end_time: float = 0.0,
+        visual_headline: str = "",
         key_terms: Optional[List[str]] = None,
         channel_name: str = "Creator Studio",
-        channel_niche: str = "Creator Education & Video Production",
-        target_audience: str = "Mobile short-form video viewers",
+        channel_niche: Optional[str] = None,
+        target_audience: Optional[str] = None,
         brand_voice: str = "Direct, engaging, authentic",
         output_dir: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Runs Role 06 Content Packager to produce titles, description, tags, and hashtags."""
+        """Runs Role 06 Content Packager to produce 5 distinct title candidates, description, tags, and hashtags.
+        Employs dynamic content understanding across all content categories and deeply executes Jake Schincariol's
+        YouTube creator skills (yt-seo, yt-package, yt-script) at runtime.
+        """
+        # Dynamic content classification (no hardcoded creator-education assumptions)
+        effective_vtitle = video_title or central_idea or "Short Highlight"
+        content_intel = YouTubeIntelligenceService.classify_content_type(effective_vtitle, transcript)
+        detected_type = content_intel["content_type"]
+        dyn_audience = target_audience or content_intel["target_audience"]
+        dyn_niche = channel_niche or detected_type.replace("_", " ").title()
+
+        # Load Jake Schincariol skill directives from skills/
+        skill_guidance = YouTubeSkillRuntime.get_package_seo_guidance()
+
         sys_prompt = (PROMPT_PACK_DIR / "06_content_packager" / "system.md").read_text(encoding="utf-8")
         user_template = (PROMPT_PACK_DIR / "06_content_packager" / "user.md").read_text(encoding="utf-8")
 
         data = {
             "clip_id": clip_id,
-            "channel_name": channel_name,
-            "channel_niche": channel_niche,
-            "target_audience": target_audience,
-            "language": "en",
-            "brand_voice": brand_voice,
-            "video_title": video_title or central_idea or "Short Highlight",
-            "transcript": transcript,
-            "central_idea": central_idea,
-            "opening_hook": opening_hook,
-            "ending_hook": ending_hook,
-            "key_terms": ", ".join(key_terms or ["video tips", "creator", "shorts growth"]),
+            "video_title": effective_vtitle,
+            "transcript": transcript or "Highlight excerpt",
+            "start_time": f"{start_time:.1f}s",
+            "end_time": f"{end_time:.1f}s",
+            "central_idea": central_idea or effective_vtitle,
+            "opening_hook": opening_hook or (transcript.split(".")[0][:60] if transcript else effective_vtitle),
+            "visual_headline": visual_headline or central_idea or effective_vtitle,
+            "skill_guidance": skill_guidance,
         }
 
         user_prompt = user_template
         for k, v in data.items():
             user_prompt = user_prompt.replace(f"{{{{{k}}}}}", str(v))
 
-        # Multi-dimensional cache lookup (preserves LLM quota across identical content)
+        # Multi-dimensional cache lookup (invalidates stale schema versions)
         cache_key = ContentCacheService.compute_packaging_cache_key(
-            transcript_text=transcript or central_idea,
+            transcript_text=f"{transcript or central_idea}::{effective_vtitle}::v3_5titles_jake",
             central_idea=central_idea,
             opening_hook=opening_hook,
-            channel_niche=channel_niche,
+            channel_niche=dyn_niche,
             model_id=cls.MODEL_FAST,
         )
         cached_pkg = ContentCacheService.get(cache_key)
@@ -96,8 +110,11 @@ class ContentPackagerService:
                 or "Key Takeaway:" in cached_desc
                 or "Did you know this? Drop a comment below!" in cached_desc
                 or "#Knowledge #Productivity" in cached_desc
+                or (detected_type == "music_performance" and any(k in cached_desc.lower() for k in ["video editing", "growth strategy", "production technique"]))
             )
-            if not is_stale and cached_pkg.get("tags") and len(cached_pkg.get("tags", [])) > 0:
+            has_5_titles = len(cached_pkg.get("titles", [])) >= 5
+            has_valid_tags = len(cached_pkg.get("tags", [])) >= 5
+            if not is_stale and has_5_titles and has_valid_tags:
                 cached_pkg["clip_id"] = clip_id
                 if output_dir:
                     out_p = Path(output_dir) / "packaging_metadata.json"
@@ -123,7 +140,7 @@ class ContentPackagerService:
             headers = {"Authorization": f"Bearer {api_key.strip()}", "Content-Type": "application/json"}
 
             try:
-                with httpx.Client(timeout=12.0) as client:
+                with httpx.Client(timeout=14.0) as client:
                     resp = client.post(cls.GROQ_API_URL, json=payload, headers=headers)
                 if resp.status_code == 200:
                     raw_content = resp.json()["choices"][0]["message"]["content"]
@@ -132,31 +149,68 @@ class ContentPackagerService:
             except Exception:
                 package = None
 
-        # Synthesize deterministic creator-grade metadata when offline or API call failed
-        if not package or not isinstance(package, dict) or not package.get("titles"):
-            synth = YouTubeIntelligenceService.synthesize_metadata(
-                text=transcript or central_idea,
-                hook=opening_hook,
-                video_title=video_title or central_idea,
-            )
+        # Synthesize creator-grade metadata when offline, API call failed, or hallucinated
+        synth = YouTubeIntelligenceService.synthesize_metadata(
+            text=transcript or central_idea,
+            hook=opening_hook,
+            video_title=effective_vtitle,
+        )
+
+        if not package or not isinstance(package, dict) or not package.get("titles") or len(package.get("titles", [])) < 3:
             package = {
                 "clip_id": clip_id,
                 "titles": synth["titles"],
-                "recommended_title_index": 0,
+                "recommended_title_index": synth.get("recommended_title_index", 1),
+                "title_rationale": synth.get("title_rationale", ""),
                 "description": synth["description"],
                 "tags": synth["tags"],
                 "hashtags": synth["hashtags"],
+                "opening_hook": synth.get("opening_hook", opening_hook),
+                "inferred_content_type": detected_type,
+                "inferred_content_understanding": synth.get("inferred_content_understanding", ""),
+                "metadata_evidence": content_intel["evidence"],
+                "skill_guidance_used": synth.get("skill_guidance_used", []),
                 "metadata_warnings": synth.get("metadata_warnings", []),
-                "rationale": synth.get("rationale", "Synthesized engaging creator copy eliminating verbatim transcript repetitions."),
+                "rationale": synth.get("rationale", ""),
             }
+        else:
+            # Check for category-error hallucination in LLM output (e.g. video tips in music)
+            llm_desc = package.get("description", "")
+            if detected_type == "music_performance" and any(k in llm_desc.lower() for k in ["video editing", "growth strategy", "production technique", "retention technique"]):
+                # Overwrite description with clean synthesized copy
+                package["description"] = synth["description"]
+                package["tags"] = synth["tags"]
+                package["hashtags"] = synth["hashtags"]
+                package["metadata_warnings"] = package.get("metadata_warnings", []) + ["Sanitized LLM category-mismatch description"]
+
+            # Ensure full 5 title candidates
+            existing_titles = package.get("titles", [])
+            if len(existing_titles) < 5:
+                needed = 5 - len(existing_titles)
+                existing_titles.extend(synth["titles"][:needed])
+                package["titles"] = existing_titles
+
+            # Ensure Jake's fields are populated
+            package["clip_id"] = clip_id
+            package["inferred_content_type"] = package.get("inferred_content_type") or detected_type
+            package["metadata_evidence"] = package.get("metadata_evidence") or content_intel["evidence"]
+            package["skill_guidance_used"] = [
+                "yt-seo: search snippet in first 2 lines & disambiguation tags",
+                "yt-package: 40/60 char desktop/mobile cutoffs & entity primacy",
+                "yt-script: 5-property hook score integration",
+            ]
+
+        # Execute yt-package title.py on all title candidates at runtime
+        for title_entry in package.get("titles", []):
+            if isinstance(title_entry, dict) and "text" in title_entry:
+                title_entry["lint_advisory"] = YouTubeSkillRuntime.check_title(title_entry["text"])
+
+        # Execute yt-script hookscore.py on opening hook at runtime
+        hook_to_score = package.get("opening_hook") or opening_hook or (package.get("titles", [{}])[0].get("text", ""))
+        package["hook_scoring"] = YouTubeSkillRuntime.score_hook(hook_to_score)
 
         # Cache generated package
         ContentCacheService.set(cache_key, "packaging", package)
-
-        # Enrich titles with advisory lint heuristics from YouTube Creator Skills Engine
-        for title_entry in package.get("titles", []):
-            if isinstance(title_entry, dict) and "text" in title_entry:
-                title_entry["lint_advisory"] = YouTubeIntelligenceService.lint_title(title_entry["text"])
 
         if output_dir:
             out_p = Path(output_dir) / "packaging_metadata.json"

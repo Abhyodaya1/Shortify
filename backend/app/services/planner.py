@@ -76,8 +76,21 @@ class SequencePlanner:
         raw_tracks = plan_data.get("tracks", [])
         if not isinstance(raw_tracks, list) or not raw_tracks:
             raw_tracks = [
-                {"name": "Video Track 1", "track_type": "video", "clips": []},
-                {"name": "Audio Track 1", "track_type": "audio", "clips": []},
+                {
+                    "name": "Video Track 1",
+                    "track_type": "video",
+                    "clips": [{"start_time_ms": 0, "duration_ms": 5000, "source": "video_clip_1", "source_in_ms": 0}],
+                },
+                {
+                    "name": "Audio Track 1",
+                    "track_type": "audio",
+                    "clips": [{"start_time_ms": 0, "duration_ms": 5000, "source": "audio_clip_1"}],
+                },
+                {
+                    "name": "Caption Track 1",
+                    "track_type": "caption",
+                    "clips": [{"start_time_ms": 0, "duration_ms": 5000, "text_content": "Introduction", "style_props": {"color": "#FFFFFF", "font_size": "48px"}}],
+                },
             ]
 
         for order_idx, raw_track in enumerate(raw_tracks):

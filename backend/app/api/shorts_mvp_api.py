@@ -18,6 +18,7 @@ from ..services.clip_selector import SmartClipSelector
 from ..services.shorts_renderer import ShortsRenderer
 from ..services.quality_assurance import QualityAssuranceEngine
 from ..services.timeline_compositor import MasterTimelineCompositor, ContentPackagerService
+from ..services.youtube_intelligence_service import YouTubeIntelligenceService
 from ..storage.profile_store import ProfileStore
 from ..storage.dataset_store import DatasetStore, ClipFeedbackSubmission
 from ..storage.session_store import SessionStore, SessionVideosProxy, SessionClipsProxy
@@ -561,16 +562,21 @@ def get_or_generate_clip_metadata(
         raise HTTPException(status_code=404, detail="Clip not found in active session.")
 
     existing_desc = clip.get("description", "")
+    vtitle_hint = (payload.video_title if payload and payload.video_title else None) or clip.get("video_title") or ""
+    detected_intel = YouTubeIntelligenceService.classify_content_type(vtitle_hint, existing_desc)
+    
     is_stale_boilerplate = (
         not existing_desc
         or "Key Takeaway from" in existing_desc
         or "Key Takeaway:" in existing_desc
         or "Did you know this? Drop a comment below!" in existing_desc
         or "#Knowledge #Productivity" in existing_desc
+        or (detected_intel["is_music"] and any(k in existing_desc.lower() for k in ["video editing", "growth strategy", "production technique", "retention technique"]))
+        or len(clip.get("title_alternatives", [])) < 5
     )
     has_valid_tags = bool(clip.get("tags") and len(clip.get("tags", [])) >= 5)
 
-    if not regenerate and not is_stale_boilerplate and has_valid_tags and clip.get("title") and clip.get("title_alternatives"):
+    if not regenerate and not is_stale_boilerplate and has_valid_tags and clip.get("title") and len(clip.get("title_alternatives", [])) >= 5:
         return {
             "status": "success",
             "clip_id": clip_id,
@@ -579,6 +585,13 @@ def get_or_generate_clip_metadata(
             "description": clip.get("description", ""),
             "hashtags": clip.get("hashtags", []),
             "tags": clip.get("tags", []),
+            "inferred_content_type": clip.get("inferred_content_type", detected_intel["content_type"]),
+            "inferred_content_understanding": clip.get("inferred_content_understanding", ""),
+            "metadata_evidence": clip.get("metadata_evidence", detected_intel["evidence"]),
+            "skill_guidance_used": clip.get("skill_guidance_used", [
+                "yt-seo: search snippet in first 2 lines & disambiguation tags",
+                "yt-package: 40/60 char desktop/mobile cutoffs & entity primacy",
+            ]),
             "source": "cached_session",
         }
 
@@ -629,6 +642,10 @@ def get_or_generate_clip_metadata(
     clip["description"] = desc
     clip["hashtags"] = hashtags
     clip["tags"] = tags
+    clip["inferred_content_type"] = pkg.get("inferred_content_type", "")
+    clip["inferred_content_understanding"] = pkg.get("inferred_content_understanding", "")
+    clip["metadata_evidence"] = pkg.get("metadata_evidence", [])
+    clip["skill_guidance_used"] = pkg.get("skill_guidance_used", [])
     discovered_clips[clip_id] = clip
     SessionStore.save_clip(clip_id, clip)
 
@@ -637,9 +654,17 @@ def get_or_generate_clip_metadata(
         "clip_id": clip_id,
         "title": best_title,
         "title_alternatives": titles,
+        "recommended_title_index": rec_idx,
+        "title_rationale": pkg.get("title_rationale", ""),
         "description": desc,
         "hashtags": hashtags,
         "tags": tags,
+        "opening_hook": pkg.get("opening_hook", ""),
+        "hook_scoring": pkg.get("hook_scoring", {}),
+        "inferred_content_type": pkg.get("inferred_content_type", ""),
+        "inferred_content_understanding": pkg.get("inferred_content_understanding", ""),
+        "metadata_evidence": pkg.get("metadata_evidence", []),
+        "skill_guidance_used": pkg.get("skill_guidance_used", []),
         "metadata_warnings": pkg.get("metadata_warnings", []),
         "rationale": pkg.get("rationale", ""),
         "source": "ai_generated",

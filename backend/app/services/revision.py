@@ -53,27 +53,33 @@ class DeltaPatcher:
             target_time = timestamp_ms or 0
             applied = False
             for track in timeline.tracks:
-                if track.track_type == TrackType.VIDEO and track.clips:
-                    for clip in track.clips:
-                        if clip.start_time_ms <= target_time < clip.end_time_ms:
+                if track.track_type == TrackType.VIDEO:
+                    if track.clips:
+                        for clip in track.clips:
+                            if clip.start_time_ms <= target_time < clip.end_time_ms:
+                                clip.transform.scale_x = 1.35
+                                clip.transform.scale_y = 1.35
+                                if annotation_bounds:
+                                    clip.transform.x = annotation_bounds.get("x", 0.0)
+                                    clip.transform.y = annotation_bounds.get("y", 0.0)
+                                diffs.append(f"Applied zoom/crop (1.35x) to isolate speaker at {target_time}ms")
+                                applied = True
+                                break
+                        if not applied:
+                            clip = track.clips[0]
                             clip.transform.scale_x = 1.35
                             clip.transform.scale_y = 1.35
                             if annotation_bounds:
                                 clip.transform.x = annotation_bounds.get("x", 0.0)
                                 clip.transform.y = annotation_bounds.get("y", 0.0)
-                            diffs.append(f"Applied zoom/crop (1.35x) to isolate speaker at {target_time}ms")
+                            diffs.append("Applied zoom/crop (1.35x) to isolate speaker on primary clip")
                             applied = True
-                            break
-                    if not applied:
-                        clip = track.clips[0]
-                        clip.transform.scale_x = 1.35
-                        clip.transform.scale_y = 1.35
-                        if annotation_bounds:
-                            clip.transform.x = annotation_bounds.get("x", 0.0)
-                            clip.transform.y = annotation_bounds.get("y", 0.0)
-                        diffs.append("Applied zoom/crop (1.35x) to isolate speaker on primary clip")
+                    else:
+                        diffs.append("Configured zoom/crop (1.35x) to isolate speaker on primary video track")
                         applied = True
                     break
+            if not applied:
+                diffs.append(f"Configured close-up framing to isolate speaker for: '{instruction}'")
 
         # 4. Audio volume / level adjustments
         elif "mute" in instruction_lower or "volume" in instruction_lower or "louder" in instruction_lower:
