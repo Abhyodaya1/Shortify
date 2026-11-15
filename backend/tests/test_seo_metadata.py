@@ -153,7 +153,7 @@ def test_schedule_payload_preserves_custom_ai_metadata():
         "video_file_path": "backend/storage/renders/short_clip_to_schedule_01.mp4",
         "thumbnail_url": "http://localhost:8000/api/v1/shorts/preview/short_clip_to_schedule_01.mp4",
         "scheduled_time": "2026-11-20T18:00:00",
-        "target_channel_id": "UC_abhyodaya_clips_sandbox",
+        "target_channel_id": "UC_peakheistclips_sandbox",
         "visibility": "unlisted",
     }
 

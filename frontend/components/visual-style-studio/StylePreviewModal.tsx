@@ -206,18 +206,17 @@ export const StylePreviewModal: React.FC<Props> = ({
                   <span
                     style={{
                       color: config.customActiveColor || caption.highlightColor || "#FFE600",
+                      WebkitTextStroke: "1px #000000",
                       textShadow:
                         (config.customAnimation === "glow_pulse" || caption.hasGlow)
-                          ? `0 0 14px ${config.customActiveColor || caption.highlightColor || "#FFE600"}`
+                          ? `0 0 8px ${config.customActiveColor || caption.highlightColor || "#00FFFF"}, 1px 1px 0 #000, -1px -1px 0 #000`
                           : "0 2px 0 #000",
                       display: "inline-block",
                     }}
                     className={`px-1 rounded-sm ${
                       (config.customAnimation === "glow_pulse" || caption.hasGlow)
                         ? "animate-pulse"
-                        : (config.customAnimation === "word_pop" || config.customAnimation === "bounce" || !config.customAnimation)
-                        ? "animate-bounce"
-                        : ""
+                        : "scale-105 transition-transform duration-150"
                     }`}
                   >
                     TRADING

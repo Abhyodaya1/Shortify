@@ -29,12 +29,13 @@ export const CaptionPresetCard: React.FC<Props> = ({ preset, isSelected, onSelec
 
         {preset.id === "neon_glow" && (
           <span
-            className="font-mono font-black text-lg tracking-wider text-[#00FFFF] uppercase"
+            className="font-headline font-black text-lg tracking-wider text-[#00FFFF] uppercase"
             style={{
-              textShadow: "0 0 8px #00FFFF, 0 0 16px #00FFFF, 0 0 24px rgba(0,255,255,0.6)",
+              WebkitTextStroke: "1px #000000",
+              textShadow: "0 0 6px rgba(0,255,255,0.7), 1px 1px 0 #000",
             }}
           >
-            NEON GLOW
+            NEON <span className="text-white">GLOW</span>
           </span>
         )}
 
@@ -42,7 +43,8 @@ export const CaptionPresetCard: React.FC<Props> = ({ preset, isSelected, onSelec
           <span
             className="font-headline font-black text-lg tracking-wider text-white uppercase"
             style={{
-              textShadow: "1px 1px 0 #000, 2px 2px 0 #000, 3px 3px 0 #000, 4px 4px 0 #D5EB45",
+              WebkitTextStroke: "1px #000000",
+              textShadow: "1px 1px 0 #000, 2px 2px 0 #000, 3px 3px 0 #D5EB45",
             }}
           >
             3D DEPTH
@@ -50,25 +52,46 @@ export const CaptionPresetCard: React.FC<Props> = ({ preset, isSelected, onSelec
         )}
 
         {preset.id === "cinematic" && (
-          <span className="font-serif italic text-base tracking-widest text-[#FAF7F2] font-semibold">
+          <span
+            className="font-sans font-bold text-base tracking-widest text-[#F8FAFC] uppercase"
+            style={{
+              WebkitTextStroke: "0.8px #000000",
+              textShadow: "0 2px 4px rgba(0,0,0,0.8)",
+            }}
+          >
             CINEMATIC
           </span>
         )}
 
         {preset.id === "gradient_wordart" && (
-          <span className="font-headline font-black text-lg tracking-wider uppercase bg-gradient-to-r from-[#FFE600] to-[#FF6B00] bg-clip-text text-transparent drop-shadow-[0_2px_0_#000]">
+          <span
+            className="font-headline font-black text-lg tracking-wider uppercase bg-gradient-to-r from-[#FFE600] to-[#FF6B00] bg-clip-text text-transparent"
+            style={{
+              WebkitTextStroke: "0.8px #000000",
+              filter: "drop-shadow(0 2px 0 #000)",
+            }}
+          >
             GRADIENT POP
           </span>
         )}
 
         {preset.id === "minimal_modern" && (
-          <span className="font-sans font-bold text-base tracking-wide text-white">
-            MINIMAL MODERN
+          <span
+            className="font-sans font-black text-base tracking-wide text-white uppercase"
+            style={{
+              WebkitTextStroke: "0.8px #000000",
+              textShadow: "0 1px 2px #000",
+            }}
+          >
+            MINIMAL <span className="text-[#38BDF8]">AZURE</span>
           </span>
         )}
 
         {preset.id === "karaoke_highlight" && (
-          <span className="font-sans font-black text-base tracking-wider text-neutral-400 uppercase">
+          <span
+            className="font-sans font-black text-base tracking-wider text-neutral-200 uppercase"
+            style={{ WebkitTextStroke: "0.8px #000000" }}
+          >
             KARAOKE <span className="text-[#D5EB45] drop-shadow-[0_1px_0_#000]">SYNC</span>
           </span>
         )}
@@ -76,14 +99,23 @@ export const CaptionPresetCard: React.FC<Props> = ({ preset, isSelected, onSelec
         {preset.id === "comic_pop" && (
           <span
             className="font-headline font-black text-lg tracking-wider text-[#FFE600] uppercase transform -rotate-2"
-            style={{ textShadow: "2px 2px 0 #000, 3px 3px 0 #FF2A85" }}
+            style={{
+              WebkitTextStroke: "1px #000000",
+              textShadow: "2px 2px 0 #000, 3px 3px 0 #FF2A85",
+            }}
           >
             COMIC POP!
           </span>
         )}
 
         {preset.id === "typewriter" && (
-          <span className="font-mono font-bold text-sm tracking-wider text-[#00E297]">
+          <span
+            className="font-mono font-bold text-sm tracking-wider text-[#22C55E]"
+            style={{
+              WebkitTextStroke: "0.6px #000000",
+              textShadow: "0 0 4px rgba(34,197,94,0.4)",
+            }}
+          >
             &gt; TYPEWRITER_
           </span>
         )}

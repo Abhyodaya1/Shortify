@@ -92,3 +92,95 @@ def test_subtitle_qa_audit(tmp_path):
     print(f"\n[Subtitle QA Report] Status: {report['status']}")
     print(f"Summary: {json.dumps(report.get('summary', {}))}")
 
+
+def test_neon_glow_sharpness_and_contrast(tmp_path):
+    """Verifies Neon subtitles have sharp, crisp outlines and controlled aura without blurry washed-out text."""
+    output_ass = tmp_path / "neon.ass"
+    words = [
+        {"word": "UNREAL", "start": 0.5, "end": 0.9},
+        {"word": "CLUTCH", "start": 0.95, "end": 1.4},
+    ]
+    KineticSubtitleCompiler.compile_ass(
+        words=words,
+        output_path=str(output_ass),
+        preset_name="neon_glow",
+        custom_animation="glow_pulse",
+    )
+    content = output_ass.read_text(encoding="utf-8")
+
+    # 1. Style line must have crisp white primary color and pitch-black outline with thick stroke
+    assert "Style: KineticSub" in content
+    # PrimaryColour=&H00FFFFFF&, OutlineColour=&H00000000&, Outline>=4.5
+    assert "&H00FFFFFF&" in content
+    assert "&H00000000&" in content
+
+    # 2. In dialogue event, neon aura must NOT blur out the border with \blur6
+    assert "\\blur6" not in content
+    # Must preserve crisp black outline (\3c&H00000000&) while casting aura (\4c)
+    assert "\\3c&H00000000&" in content
+
+
+def test_blue_and_coloured_contrast_elevation():
+    """Verifies that dark or low-contrast blue colors are elevated to vivid electric azure for high contrast."""
+    from backend.app.services.kinetic_subtitle_compiler import hex_to_ass_color
+
+    # Pure dark blue (#0000FF) has low luminance (~29), should be boosted to electric azure
+    ass_blue = hex_to_ass_color("#0000FF")
+    assert ass_blue.startswith("&H00") and ass_blue.endswith("&")
+    # Verify green/blue components ensure high luminance
+    # Hex in ASS is &H00BBGGRR&
+    b_hex = ass_blue[4:6] # BB
+    g_hex = ass_blue[6:8] # GG
+    assert int(b_hex, 16) >= 200
+    assert int(g_hex, 16) >= 150 # elevated green gives azure brightness
+
+
+def test_genuine_typewriter_character_by_character(tmp_path):
+    """Verifies that Typewriter animation reveals characters sequentially (T -> TA -> TAP)
+    while keeping completed words visible and matching actual speech timing.
+    """
+    output_ass = tmp_path / "typewriter.ass"
+    words = [
+        {"word": "TAP", "start": 1.0, "end": 1.3},
+        {"word": "HERE", "start": 1.35, "end": 1.75},
+    ]
+
+    KineticSubtitleCompiler.compile_ass(
+        words=words,
+        output_path=str(output_ass),
+        preset_name="typewriter",
+        custom_animation="typewriter",
+    )
+    content = output_ass.read_text(encoding="utf-8")
+
+    dialogue_lines = [l for l in content.splitlines() if l.startswith("Dialogue: 0,")]
+    # Word 1 (TAP: 3 chars) + Word 2 (HERE: 4 chars) = at least 7 incremental events
+    assert len(dialogue_lines) >= 7
+
+    # Check incremental typing of "TAP"
+    texts = [l.split(",,", 1)[1] for l in dialogue_lines]
+    # Letter 1: "T"
+    assert any("T{\\r}" in t for t in texts)
+    # Letter 2: "TA"
+    assert any("TA{\\r}" in t for t in texts)
+    # Letter 3: "TAP"
+    assert any("TAP{\\r}" in t for t in texts)
+
+    # When typing "HERE", the completed prior word "TAP" MUST remain visible!
+    assert any("TAP {\\c" in t and "H" in t for t in texts)
+    assert any("TAP {\\c" in t and "HE" in t for t in texts)
+    assert any("TAP {\\c" in t and "HER" in t for t in texts)
+    assert any("TAP {\\c" in t and "HERE" in t for t in texts)
+
+
+def test_all_presets_have_sufficient_contrast_and_outline():
+    """Verifies that every preset in SubtitlePreset has an outline width >= 4.0
+    and pure black outline for consistent legibility across all backgrounds.
+    """
+    from backend.app.services.kinetic_subtitle_compiler import SubtitlePreset
+
+    for name, preset in SubtitlePreset.PRESETS.items():
+        assert preset["outline_width"] >= 4.0, f"Preset '{name}' outline too thin ({preset['outline_width']})"
+        assert preset["outline_color"] == "&H00000000&", f"Preset '{name}' must have pure black outline"
+        assert preset["margin_v_ratio"] >= 0.18, f"Preset '{name}' margin too close to screen edge"
+

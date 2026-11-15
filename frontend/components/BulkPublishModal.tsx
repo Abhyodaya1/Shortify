@@ -147,7 +147,7 @@ export function BulkPublishModal({
           video_file_path: c.rendered_video_url || `short_${c.clip_id}.mp4`,
           thumbnail_url: c.preview_url || "",
           visibility: bulkVisibility,
-          target_channel_id: currentChannel?.channel_id || "UC_abhyodaya_clips_sandbox",
+          target_channel_id: currentChannel?.channel_id || "UC_peakheistclips_sandbox",
         })),
       };
 
@@ -212,7 +212,7 @@ export function BulkPublishModal({
           video_file_path: r.video_file_path,
           scheduled_time: r.scheduled_time,
           visibility: r.visibility,
-          target_channel_id: currentChannel?.channel_id || "UC_abhyodaya_clips_sandbox",
+          target_channel_id: currentChannel?.channel_id || "UC_peakheistclips_sandbox",
         })),
       };
 
