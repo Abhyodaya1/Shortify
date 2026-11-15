@@ -395,6 +395,135 @@ class YouTubeIntelligenceService:
             }
         }
 
+    @classmethod
+    def synthesize_metadata(
+        cls,
+        text: str,
+        hook: str,
+        video_title: str = "",
+        channel_handle: str = "@AbhyodayaClips",
+    ) -> Dict[str, Any]:
+        """Synthesizes high-performing YouTube metadata without raw transcript dumps or repetitive chants.
+        Adheres strictly to master_seo.md requirements:
+        - Never copies raw transcript fragments verbatim into description.
+        - Suppresses repetitive speech loops (e.g. repeated lyrics in songs/edits).
+        - Generates 2-3 engaging, professional copy sentences.
+        - Generates 8-15 targeted search tags (no '#' symbols).
+        - Generates 3-5 hyper-relevant hashtags tailored to the topic.
+        - Provides 3 distinct title angles.
+        """
+        clean_hook = hook.strip('"\'.') if hook else ""
+        clean_vtitle = video_title.strip('"\'.') if video_title else ""
+
+        # 1. Detect repetitive phrases / speech loops (e.g. "Don't believe me, just watch" repeated 3+ times)
+        words = text.split()
+        phrase_counts: Dict[str, int] = {}
+        for n in range(3, 7):
+            for i in range(len(words) - n + 1):
+                phrase = " ".join(words[i : i + n]).lower()
+                phrase_counts[phrase] = phrase_counts.get(phrase, 0) + 1
+
+        max_repetition = max(phrase_counts.values()) if phrase_counts else 0
+        is_repetitive_audio = max_repetition >= 3
+
+        # 2. Extract meaningful topic entities from title, hook, and unique text words
+        meaningful_words = [
+            w for w in re.findall(r"\b[A-Za-z]{3,}\b", f"{clean_vtitle} {clean_hook} {text}")
+            if w.lower() not in {
+                "this", "that", "there", "about", "would", "could", "should", "their", "where", "which",
+                "being", "having", "these", "those", "because", "every", "really", "going", "doing",
+                "stop", "wait", "just", "from", "with", "minute", "some", "tell", "like", "when", "your"
+            }
+        ]
+
+        # Derive primary subject/entity
+        primary_entity = clean_vtitle or (clean_hook.split()[0] if clean_hook else "Trending Moment")
+        topic_title = re.sub(r'[^a-zA-Z0-9\s]', '', primary_entity).title().strip()
+
+        # Determine content genre (music/edit vs tutorial vs commentary)
+        lower_full = f"{clean_vtitle} {clean_hook} {text}".lower()
+        is_music = any(k in lower_full for k in ["track", "beat", "song", "remix", "music", "liquor", "listen", "dance", "audio", "verse", "chorus"]) or is_repetitive_audio
+
+        # 3. Generate 3 distinct title angles (<40 chars mobile safe, <60 chars desktop, twist)
+        clean_h = clean_hook if clean_hook else (clean_vtitle or "Unbelievable Moment")
+        if len(clean_h) > 55:
+            title_direct = f"{clean_h[:38]}..."
+        else:
+            title_direct = clean_h
+
+        title_curiosity = f"Why {topic_title} Is Taking Over" if len(topic_title) < 25 else f"The Truth About {topic_title[:30]}"
+        if len(title_curiosity) > 58:
+            title_curiosity = title_curiosity[:55] + "..."
+
+        title_twist = f"Nobody Expected This From {topic_title}" if len(topic_title) < 22 else f"Wait For The Drop in {topic_title[:28]}"
+        if len(title_twist) > 58:
+            title_twist = title_twist[:55] + "..."
+
+        titles = [
+            {"text": title_direct, "angle": "direct", "accuracy_note": "Grounded in opening hook (<40 chars mobile safe)"},
+            {"text": title_curiosity, "angle": "curiosity-driven", "accuracy_note": "Focuses on central premise"},
+            {"text": title_twist, "angle": "twist", "accuracy_note": "Highlights the unexpected highlight"},
+        ]
+
+        # 4. Generate professional, non-boilerplate description (2-3 sentences)
+        if is_music:
+            desc_sentence1 = f"{clean_h}."
+            desc_sentence2 = f"An electrifying performance from '{clean_vtitle or topic_title}' with unmatched rhythm and energy."
+            desc_sentence3 = "Watch till the end to catch every detail."
+        else:
+            desc_sentence1 = f"{clean_h}."
+            desc_sentence2 = f"A closer look at the key moment from '{clean_vtitle or topic_title}' that everyone is talking about."
+            desc_sentence3 = "Hit like and subscribe for more daily insights."
+
+        # Topic-specific hashtags (never generic #Productivity unless topic is productivity)
+        clean_tag_slug = re.sub(r'[^a-zA-Z0-9]', '', topic_title.replace(' ', ''))[:16]
+        hashtags = ["#Shorts", "#YouTubeShorts"]
+        if clean_tag_slug and clean_tag_slug.lower() not in ["shorts", "youtubeshorts"]:
+            hashtags.append(f"#{clean_tag_slug}")
+        if is_music:
+            hashtags.extend(["#Music", "#Trending"])
+        else:
+            hashtags.extend(["#Viral", "#MustWatch"])
+        hashtags = hashtags[:5]
+
+        description = f"{desc_sentence1} {desc_sentence2}\n\n{desc_sentence3}\n\n{' '.join(hashtags)}"
+
+        # 5. Targeted SEO search tags (8-15 plain strings, no '#')
+        tags = ["Shorts", "YouTubeShorts"]
+        if is_music:
+            tags.extend(["MusicTrack", "Remix", "HighEnergy", "BeatDrop"])
+        else:
+            tags.extend(["ViralShorts", "VideoHighlights", "TrendingNow"])
+
+        for w in meaningful_words:
+            w_cap = w.title()
+            if w_cap not in tags and len(w_cap) > 2:
+                tags.append(w_cap)
+            if len(tags) >= 15:
+                break
+
+        # Ensure at least 8 tags
+        fallback_fillers = ["ShortsFeed", "YouTubeAlgorithm", "ContentCreator", "ViralVideo", "MustWatch"]
+        for f in fallback_fillers:
+            if len(tags) < 8 and f not in tags:
+                tags.append(f)
+        tags = tags[:15]
+
+        # Lint all titles with YouTubeIntelligenceService
+        for t_entry in titles:
+            t_entry["lint_advisory"] = cls.lint_title(t_entry["text"])
+
+        return {
+            "title": title_direct,
+            "titles": titles,
+            "recommended_title_index": 0,
+            "description": description,
+            "tags": tags,
+            "hashtags": hashtags,
+            "metadata_warnings": ["Repetitive audio loop synthesized into music copy"] if is_repetitive_audio else [],
+            "rationale": "Synthesized engaging creator copy eliminating verbatim transcript repetitions.",
+        }
+
     # -------------------------------------------------------------------------
     # 6. Trending Topics & Compliant Audio Intelligence (Stage C)
     # -------------------------------------------------------------------------

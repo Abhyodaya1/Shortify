@@ -197,3 +197,99 @@ def test_metadata_caching_and_regeneration():
     assert res3.status_code == 200
     data3 = res3.json()
     assert data3["source"] == "ai_generated"
+
+
+def test_repetitive_audio_suppresses_raw_transcript_and_boilerplate():
+    """Verifies that repetitive audio/lyrics (e.g. 'Don't believe me just watch' 30 times)
+    is synthesized into clean creator copy, completely eliminating verbatim transcript dumps
+    and formulaic 'Key Takeaway from' / '#Knowledge #Productivity' boilerplate (master_seo.md).
+    """
+    clip_id = "clip_ultron_repetitive"
+    repeated_lyrics = (
+        "Don't believe me, just watch Don't believe me, just watch Don't believe me, just watch "
+        "Don't believe me, just watch Hey, hey, hey, oh Stop, wait a minute Fill my cup, put some liquor in it "
+        "Take a sip, sign a check Julio, get the stretch Don't believe me, just watch "
+        "Don't believe me, just watch Don't believe me, just watch Don't believe me, just watch"
+    )
+
+    discovered_clips[clip_id] = {
+        "clip_id": clip_id,
+        "transcript_segment": repeated_lyrics,
+        "opening_hook": "This track repeats the same line 30 times.",
+        "video_title": "Ultron created this",
+        "headline": "Watch Ultron's Secret Move",
+        "cues": [{"start": 0.0, "end": 10.0, "text": repeated_lyrics[:60]}],
+    }
+
+    res = client.post(f"/api/v1/shorts/clips/{clip_id}/metadata?regenerate=true")
+    assert res.status_code == 200
+    data = res.json()
+
+    desc = data["description"]
+    # 1. Zero robotic boilerplate
+    assert "Key Takeaway from" not in desc
+    assert "Key Takeaway:" not in desc
+    assert "Did you know this? Drop a comment below!" not in desc
+    assert "#Knowledge" not in desc
+    assert "#Productivity" not in desc
+
+    # 2. No raw 30-repetition transcript dump
+    assert "Don't believe me, just watch Don't believe me, just watch" not in desc
+
+    # 3. Relevant hashtags and tags
+    assert "#Shorts" in desc
+    tags = data["tags"]
+    assert isinstance(tags, list)
+    assert len(tags) >= 8
+    assert not any(t.startswith("#") for t in tags)
+    assert any("ultron" in t.lower() or "music" in t.lower() or "track" in t.lower() for t in tags)
+
+
+def test_post_metadata_with_payload_resurrects_clip():
+    """Verifies that sending a POST with JSON body succeeds even if clip_id is not yet in backend memory."""
+    new_clip_id = "clip_external_resurrect_01"
+
+    payload = {
+        "transcript": "Color grading with ACES transforms your color fidelity across different camera sensors.",
+        "opening_hook": "Color grading with ACES is incredible.",
+        "headline": "ACES Color Workflow",
+        "title": "ACES Secret",
+        "video_title": "Color Grading Masterclass",
+    }
+
+    res = client.post(f"/api/v1/shorts/clips/{new_clip_id}/metadata", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+
+    assert data["status"] == "success"
+    assert data["clip_id"] == new_clip_id
+    assert len(data["title_alternatives"]) >= 3
+    assert len(data["tags"]) >= 5
+    assert "Key Takeaway from" not in data["description"]
+
+
+def test_stale_boilerplate_detection_auto_upgrades_description():
+    """Verifies that if a clip has a legacy boilerplate description in session, calling metadata
+    detects the stale boilerplate and automatically upgrades it to synthesized creator copy.
+    """
+    clip_id = "clip_legacy_stale_01"
+    discovered_clips[clip_id] = {
+        "clip_id": clip_id,
+        "title": "#3 Watch Ultron's Secret Move",
+        "description": "This track repeats the same line 30 times.\n\nKey Takeaway from Ultron created this:\n\"Don't believe me, just watch...\"\n\nDid you know this? Drop a comment below!\n\n#Shorts #YouTubeShorts #Knowledge #Productivity #Creator",
+        "tags": ["Shorts", "Creator"],
+        "title_alternatives": [{"text": "Watch Ultron's Secret Move", "angle": "direct"}],
+        "transcript_segment": "Don't believe me, just watch Don't believe me, just watch Hey, hey, hey, oh",
+        "opening_hook": "This track repeats the same line 30 times.",
+        "video_title": "Ultron created this",
+    }
+
+    # Should detect stale boilerplate even with regenerate=False
+    res = client.get(f"/api/v1/shorts/clips/{clip_id}/metadata")
+    assert res.status_code == 200
+    data = res.json()
+
+    assert "Key Takeaway from" not in data["description"]
+    assert "#Knowledge #Productivity" not in data["description"]
+    assert len(data["tags"]) >= 8
+

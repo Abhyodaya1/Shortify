@@ -1,30 +1,37 @@
-Create metadata for this approved YouTube Short.
+Create high-performance YouTube metadata for this approved Short.
 
-CHANNEL
+CHANNEL CONTEXT:
 Name: {{channel_name}}
 Niche: {{channel_niche}}
 Audience: {{target_audience}}
 Language: {{language}}
 Brand voice: {{brand_voice}}
 
-CLIP
-Transcript: {{transcript}}
-Central idea: {{central_idea}}
-Approved opening hook: {{opening_hook}}
-Approved ending hook: {{ending_hook}}
-Key terms: {{key_terms}}
+CLIP CONTEXT:
+Title / Context: {{video_title}}
+Spoken Transcript: {{transcript}}
+Central Premise: {{central_idea}}
+Opening Hook: {{opening_hook}}
+Key Entities / Terms: {{key_terms}}
 
-Generate 3 title alternatives, one recommended description, relevant tags, and a small set of relevant hashtags.
+TASK:
+1. Generate 3 compelling title alternatives (direct mobile-safe under 40 chars, curiosity-driven under 60 chars, and contrarian/twist under 60 chars).
+2. Generate 1 polished description (2-3 natural, engaging sentences explaining the highlight, followed by 3-5 specific hashtags). Do NOT quote the transcript verbatim. Do NOT use boilerplate like "Key Takeaway from...".
+3. Generate 8-15 substantive SEO search tags (plain keywords, no # symbols).
+4. Select the recommended title index (0, 1, or 2).
 
-Return JSON:
+Return strictly JSON:
 {
   "clip_id": "{{clip_id}}",
-  "titles": [{"text": "", "angle": "benefit-led", "accuracy_note": ""}],
+  "titles": [
+    {"text": "Short punchy title", "angle": "direct", "accuracy_note": "Grounded in opening thesis"},
+    {"text": "Curiosity driven title", "angle": "curiosity-driven", "accuracy_note": "Focuses on central premise"},
+    {"text": "Contrarian or twist title", "angle": "twist", "accuracy_note": "Highlights unexpected moment"}
+  ],
   "recommended_title_index": 0,
-  "description": "",
-  "tags": [],
-  "hashtags": [],
+  "description": "Engaging two or three sentence description summarizing the clip's best moment.\n\n#Shorts #SpecificTopic #Keyword",
+  "tags": ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7", "tag8"],
+  "hashtags": ["#Shorts", "#SpecificTopic", "#Keyword"],
   "metadata_warnings": [],
-  "rationale": ""
+  "rationale": "High-clarity metadata tailored specifically to this clip."
 }
-Do not invent URLs, citations, statistics, or claims.

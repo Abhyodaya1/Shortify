@@ -49,6 +49,7 @@ class ContentPackagerService:
         central_idea: str,
         opening_hook: str = "",
         ending_hook: str = "",
+        video_title: str = "",
         key_terms: Optional[List[str]] = None,
         channel_name: str = "Creator Studio",
         channel_niche: str = "Creator Education & Video Production",
@@ -67,6 +68,7 @@ class ContentPackagerService:
             "target_audience": target_audience,
             "language": "en",
             "brand_voice": brand_voice,
+            "video_title": video_title or central_idea or "Short Highlight",
             "transcript": transcript,
             "central_idea": central_idea,
             "opening_hook": opening_hook,
@@ -88,13 +90,21 @@ class ContentPackagerService:
         )
         cached_pkg = ContentCacheService.get(cache_key)
         if cached_pkg is not None and isinstance(cached_pkg, dict):
-            cached_pkg["clip_id"] = clip_id
-            if output_dir:
-                out_p = Path(output_dir) / "packaging_metadata.json"
-                out_p.parent.mkdir(parents=True, exist_ok=True)
-                with open(out_p, "w", encoding="utf-8") as f:
-                    json.dump(cached_pkg, f, indent=2)
-            return cached_pkg
+            cached_desc = cached_pkg.get("description", "")
+            is_stale = (
+                "Key Takeaway from" in cached_desc
+                or "Key Takeaway:" in cached_desc
+                or "Did you know this? Drop a comment below!" in cached_desc
+                or "#Knowledge #Productivity" in cached_desc
+            )
+            if not is_stale and cached_pkg.get("tags") and len(cached_pkg.get("tags", [])) > 0:
+                cached_pkg["clip_id"] = clip_id
+                if output_dir:
+                    out_p = Path(output_dir) / "packaging_metadata.json"
+                    out_p.parent.mkdir(parents=True, exist_ok=True)
+                    with open(out_p, "w", encoding="utf-8") as f:
+                        json.dump(cached_pkg, f, indent=2)
+                return cached_pkg
 
         api_key = os.getenv("GROQ_API_KEY")
         package: Optional[Dict[str, Any]] = None
@@ -113,7 +123,7 @@ class ContentPackagerService:
             headers = {"Authorization": f"Bearer {api_key.strip()}", "Content-Type": "application/json"}
 
             try:
-                with httpx.Client(timeout=25.0) as client:
+                with httpx.Client(timeout=12.0) as client:
                     resp = client.post(cls.GROQ_API_URL, json=payload, headers=headers)
                 if resp.status_code == 200:
                     raw_content = resp.json()["choices"][0]["message"]["content"]
@@ -122,62 +132,22 @@ class ContentPackagerService:
             except Exception:
                 package = None
 
-        # Deterministic transcript-grounded generation when offline or API call failed
+        # Synthesize deterministic creator-grade metadata when offline or API call failed
         if not package or not isinstance(package, dict) or not package.get("titles"):
-            clean_hook = opening_hook.strip('"\'.') if opening_hook else ""
-            if not clean_hook and transcript:
-                first_sent = transcript.split(".")[0].strip('"\'.')
-                clean_hook = first_sent[:60] if len(first_sent) > 5 else transcript[:60]
-            if not clean_hook:
-                clean_hook = central_idea[:60].strip('"\'.') if central_idea else "Key Creator Insight"
-
-            # Extract substantive nouns/verbs for targeted keyword tags
-            topic_words = [w for w in re.findall(r"\b[A-Za-z]{4,}\b", transcript or central_idea) if w.lower() not in {
-                "this", "that", "there", "about", "would", "could", "should", "their", "where", "which",
-                "being", "having", "these", "those", "because", "every", "really", "going", "doing"
-            }]
-            raw_topic = central_idea if (central_idea and central_idea != "High-impact creator video insights") else (
-                " ".join(topic_words[:3]).title() or "Video Strategy"
+            synth = YouTubeIntelligenceService.synthesize_metadata(
+                text=transcript or central_idea,
+                hook=opening_hook,
+                video_title=video_title or central_idea,
             )
-
-            title1 = f"{clean_hook[:55]} | #Shorts" if clean_hook else f"{raw_topic[:55]} | #Shorts"
-            title2 = f"The Truth About {raw_topic}"[:60]
-            title3 = f"Why Most People Get {raw_topic} Wrong"[:60]
-
-            # Targeted SEO tags (substantive entity keywords, plain strings, no #)
-            tags = ["Shorts", "YouTubeShorts", "CreatorEconomy", "VideoStrategy"]
-            for tw in topic_words[:12]:
-                cap_w = tw.title()
-                if cap_w not in tags:
-                    tags.append(cap_w)
-            tags = tags[:15]
-
-            # Hashtags (3-5 relevant hashtags with #)
-            topic_slug = re.sub(r'[^a-zA-Z0-9]', '', raw_topic.title())[:18]
-            hashtags = ["#Shorts", "#YouTubeShorts", f"#{topic_slug or 'Insights'}", "#Education", "#Creator"]
-
-            takeaway_quote = transcript[:160].strip() if transcript else clean_hook
-            description = (
-                f"{clean_hook}.\n\n"
-                f"Key Takeaway:\n"
-                f"\"{takeaway_quote}...\"\n\n"
-                f"What do you think? Drop a comment below!\n\n"
-                f"{' '.join(hashtags)}"
-            )
-
             package = {
                 "clip_id": clip_id,
-                "titles": [
-                    {"text": title1, "angle": "benefit-led", "accuracy_note": "Grounded in opening thesis"},
-                    {"text": title2, "angle": "curiosity-driven", "accuracy_note": "Focuses on central premise"},
-                    {"text": title3, "angle": "contrarian", "accuracy_note": "Educational contrarian angle"},
-                ],
+                "titles": synth["titles"],
                 "recommended_title_index": 0,
-                "description": description,
-                "tags": tags,
-                "hashtags": hashtags,
-                "metadata_warnings": [],
-                "rationale": "High-clarity metadata grounded deterministically in spoken transcript cues and opening thesis.",
+                "description": synth["description"],
+                "tags": synth["tags"],
+                "hashtags": synth["hashtags"],
+                "metadata_warnings": synth.get("metadata_warnings", []),
+                "rationale": synth.get("rationale", "Synthesized engaging creator copy eliminating verbatim transcript repetitions."),
             }
 
         # Cache generated package

@@ -67,7 +67,22 @@ export function ScheduleModal({
       const url = `http://localhost:8000/api/v1/shorts/clips/${clip.clip_id}/metadata${
         forceRegenerate ? "?regenerate=true" : ""
       }`;
-      const res = await fetch(url, { method: "POST" });
+      const payload = {
+        transcript:
+          clip.spoken_text ||
+          clip.transcript_segment ||
+          (clip.cues ? clip.cues.map((c: any) => c.text).join(" ") : ""),
+        opening_hook: clip.opening_hook || clip.visual_headline || "",
+        headline: clip.visual_headline || clip.headline || clip.title || "",
+        title: clip.title || "",
+        video_title: clip.video_title || currentChannel?.channel_title || "",
+        regenerate: forceRegenerate,
+      };
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
       if (!res.ok) {
         throw new Error(`Failed to load AI metadata (${res.status})`);
       }
@@ -97,15 +112,36 @@ export function ScheduleModal({
       });
     } catch (err: any) {
       console.warn("AI metadata fetch fallback:", err.message);
-      // Fallback safely to clip properties
-      const fallbackTitle = clip.title || clip.headline || "Viral Short";
-      const fallbackDesc =
-        clip.description ||
-        `${fallbackTitle}\n\n#Shorts #CreatorGrowth`;
-      const fallbackTags = Array.isArray(clip.tags) ? clip.tags.join(", ") : clip.tags || "";
-      setTitle(fallbackTitle);
-      setDescription(fallbackDesc);
-      setTags(fallbackTags);
+      // Clean fallback avoiding repetitive transcript excerpts and legacy templates
+      const rawTitle = clip.title || clip.headline || "Viral Short";
+      const cleanTitle = rawTitle.replace(/^#\d+\s*/, "").replace(/\s*\|\s*#Shorts.*$/, "");
+
+      let cleanDesc = clip.description || "";
+      if (
+        !cleanDesc ||
+        cleanDesc.includes("Key Takeaway from") ||
+        cleanDesc.includes("Key Takeaway:") ||
+        cleanDesc.includes("Did you know this? Drop a comment below!") ||
+        cleanDesc.includes("#Knowledge #Productivity")
+      ) {
+        cleanDesc = `${cleanTitle}.\n\nAn unforgettable highlight with dynamic rhythm and energy.\n\n#Shorts #YouTubeShorts #Trending`;
+      }
+
+      let cleanTagsStr = "";
+      if (Array.isArray(clip.tags) && clip.tags.length > 0) {
+        cleanTagsStr = clip.tags.join(", ");
+      } else {
+        const titleWords = cleanTitle.replace(/[^a-zA-Z0-9\s]/g, "").split(/\s+/).filter((w: string) => w.length > 3);
+        const autoTags = ["Shorts", "YouTubeShorts", "ViralVideo", "TrendingNow"];
+        for (const tw of titleWords) {
+          if (!autoTags.includes(tw)) autoTags.push(tw);
+        }
+        cleanTagsStr = autoTags.slice(0, 10).join(", ");
+      }
+
+      setTitle(rawTitle);
+      setDescription(cleanDesc);
+      setTags(cleanTagsStr);
     } finally {
       setIsLoadingMetadata(false);
     }
@@ -120,11 +156,20 @@ export function ScheduleModal({
     d.setHours(d.getHours() + 2);
     setScheduledDate(d.toISOString().slice(0, 16));
 
-    // If clip already has rich AI metadata with tags and alternatives, hydrate directly
+    // Detect if current clip description is stale legacy boilerplate
+    const isStaleDesc =
+      !clip.description ||
+      clip.description.includes("Key Takeaway from") ||
+      clip.description.includes("Key Takeaway:") ||
+      clip.description.includes("Did you know this? Drop a comment below!") ||
+      clip.description.includes("#Knowledge #Productivity");
+
+    // If clip already has clean rich AI metadata with tags and alternatives, hydrate directly
     const hasRichMeta =
+      !isStaleDesc &&
       Boolean(clip.title) &&
       Array.isArray(clip.tags) &&
-      clip.tags.length > 0 &&
+      clip.tags.length >= 4 &&
       Array.isArray(clip.title_alternatives) &&
       clip.title_alternatives.length > 0;
 
@@ -136,8 +181,8 @@ export function ScheduleModal({
       setMetadataSource("cached_session");
       setIsLoadingMetadata(false);
     } else {
-      // Auto-fetch transcript-grounded metadata from backend
-      fetchAiMetadata(false);
+      // Auto-fetch or regenerate clean transcript-grounded metadata from backend
+      fetchAiMetadata(true);
     }
   }, [clip?.clip_id, isOpen]);
 

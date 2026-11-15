@@ -521,19 +521,56 @@ def fast_re_render_subtitles(payload: FastReRenderRequest):
     }
 
 
+class ClipMetadataPayload(BaseModel):
+    transcript: Optional[str] = None
+    opening_hook: Optional[str] = None
+    headline: Optional[str] = None
+    title: Optional[str] = None
+    video_title: Optional[str] = None
+    channel_name: Optional[str] = None
+    channel_niche: Optional[str] = None
+    regenerate: bool = False
+
+
 @router.get("/clips/{clip_id}/metadata", summary="Get or generate AI YouTube metadata for a clip")
 @router.post("/clips/{clip_id}/metadata", summary="Generate or regenerate AI YouTube metadata for a clip")
 def get_or_generate_clip_metadata(
     clip_id: str,
     regenerate: bool = Query(default=False, description="Force regenerate even if already present"),
+    payload: Optional[ClipMetadataPayload] = None,
 ):
-    """Generates transcript-grounded YouTube metadata: title alternatives, description, tags, and hashtags."""
-    if clip_id not in discovered_clips:
+    """Generates transcript-grounded YouTube metadata: title alternatives, description, tags, and hashtags.
+    Eliminates formulaic boilerplate, repeated lyrics, and raw transcript excerpts (master_seo.md).
+    """
+    if payload and payload.regenerate:
+        regenerate = True
+
+    clip = discovered_clips.get(clip_id) or SessionStore.get_clip(clip_id)
+    if not clip and payload:
+        # Reconstruct clip object from incoming frontend context
+        clip = {
+            "clip_id": clip_id,
+            "transcript_segment": payload.transcript or "",
+            "opening_hook": payload.opening_hook or "",
+            "visual_headline": payload.headline or "",
+            "headline": payload.headline or "",
+            "title": payload.title or "",
+            "video_title": payload.video_title or "",
+        }
+    if not clip:
         raise HTTPException(status_code=404, detail="Clip not found in active session.")
 
-    clip = discovered_clips[clip_id]
+    existing_desc = clip.get("description", "")
+    is_stale_boilerplate = (
+        not existing_desc
+        or "Key Takeaway from" in existing_desc
+        or "Key Takeaway:" in existing_desc
+        or "Did you know this? Drop a comment below!" in existing_desc
+        or "#Knowledge #Productivity" in existing_desc
+    )
+    has_valid_tags = bool(clip.get("tags") and len(clip.get("tags", [])) >= 5)
 
-    if not regenerate and clip.get("title") and clip.get("tags") and clip.get("hashtags") and clip.get("title_alternatives"):
+    if not regenerate and not is_stale_boilerplate and has_valid_tags and clip.get("title") and clip.get("title_alternatives"):
         return {
             "status": "success",
             "clip_id": clip_id,
@@ -547,15 +584,37 @@ def get_or_generate_clip_metadata(
 
     # Extract text from transcript segment or cues
     cues = clip.get("cues") or clip.get("subtitles") or []
-    transcript_text = clip.get("transcript_segment") or " ".join([c.get("text", "") for c in cues if isinstance(c, dict)]).strip()
-    central_idea = clip.get("central_idea") or clip.get("headline") or clip.get("title") or "Key Creator Insight"
-    opening_hook = clip.get("opening_hook") or clip.get("visual_headline") or ""
+    transcript_text = (
+        (payload.transcript if payload and payload.transcript else None)
+        or clip.get("transcript_segment")
+        or " ".join([c.get("text", "") for c in cues if isinstance(c, dict)]).strip()
+    )
+    central_idea = (
+        (payload.headline if payload and payload.headline else None)
+        or clip.get("central_idea")
+        or clip.get("headline")
+        or clip.get("title")
+        or "Key Creator Insight"
+    )
+    opening_hook = (
+        (payload.opening_hook if payload and payload.opening_hook else None)
+        or clip.get("opening_hook")
+        or clip.get("visual_headline")
+        or ""
+    )
+    vtitle = (
+        (payload.video_title if payload and payload.video_title else None)
+        or clip.get("video_title")
+        or clip.get("parent_video_title")
+        or central_idea
+    )
 
     pkg = ContentPackagerService.package_content(
         clip_id=clip_id,
         transcript=transcript_text,
         central_idea=central_idea,
         opening_hook=opening_hook,
+        video_title=vtitle,
     )
 
     titles = pkg.get("titles", [])
@@ -571,6 +630,7 @@ def get_or_generate_clip_metadata(
     clip["hashtags"] = hashtags
     clip["tags"] = tags
     discovered_clips[clip_id] = clip
+    SessionStore.save_clip(clip_id, clip)
 
     return {
         "status": "success",

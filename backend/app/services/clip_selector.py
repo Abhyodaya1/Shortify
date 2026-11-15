@@ -467,60 +467,32 @@ class SmartClipSelector:
         topic_words = text.split()[:6]
         topic = " ".join(topic_words)
         central_idea = text[:120].strip() + "..."
-
         clean_h = visual_headline.strip('\".,') if visual_headline else clean_hook
-        if clean_h:
-            title = f"{clean_h} | #Shorts"
-        else:
-            title = f"{clean_hook} | #Shorts"
 
+        # Synthesize professional creator metadata eliminating raw transcript repetitions
+        synth = YouTubeIntelligenceService.synthesize_metadata(
+            text=text,
+            hook=clean_h or clean_hook,
+            video_title=video_title or topic,
+        )
+
+        title = f"{synth['title']} | #Shorts" if not synth['title'].endswith("#Shorts") else synth['title']
         if len(title) > 90:
             title = f"{title[:75]}... #Shorts"
 
-        # Generate targeted, transcript-grounded SEO tags
-        seo_meta = YouTubeIntelligenceService.generate_seo_metadata(
-            topic=topic or video_title,
-            headline=clean_h
-        )
-        tags = list(seo_meta.get("tags", ["Shorts", "YouTubeShorts", "VideoTips", "CreatorEconomy"]))
-        # Extract specific substantive nouns/verbs from spoken transcript
-        words_list = [w for w in re.findall(r"\b[A-Za-z]{4,}\b", text) if w.lower() not in {
-            "this", "that", "there", "about", "would", "could", "should", "their", "where", "which", "being", "having"
-        }]
-        for w in words_list[:8]:
-            wt = w.title()
-            if wt not in tags:
-                tags.append(wt)
-        tags = tags[:15]
-
-        # Transcript-derived hashtags (separate from tags)
-        clean_topic_tag = re.sub(r'[^a-zA-Z0-9]', '', topic.title())[:20]
-        hashtags = ["#Shorts", "#YouTubeShorts", f"#{clean_topic_tag or 'Insights'}", "#Education", "#Creator"]
-
-        description = (
-            f"{clean_hook}.\n\n"
-            f"Key Takeaway from {video_title}:\n"
-            f"\"{text[:160]}...\"\n\n"
-            f"Did you know this? Drop a comment below!\n\n"
-            f"{' '.join(hashtags)}"
-        )
         pinned_comment = f"What is your biggest takeaway from this? Let us know in the comments!"
-
-        title_alternatives = [
-            {"text": title.replace(" | #Shorts", ""), "angle": "curiosity-driven", "accuracy_note": "Grounded in opening thesis"},
-            {"text": f"{clean_hook[:60]}", "angle": "actionable", "accuracy_note": "Direct hook quote"},
-            {"text": f"Why Most People Misunderstand {topic.title()}"[:60], "angle": "contrarian", "accuracy_note": "Educational angle"},
-        ]
 
         return {
             "topic": topic,
             "central_idea": central_idea,
             "title": title,
-            "title_alternatives": title_alternatives,
-            "description": description,
-            "hashtags": hashtags,
-            "tags": tags,
+            "title_alternatives": synth.get("titles", []),
+            "description": synth.get("description", ""),
+            "hashtags": synth.get("hashtags", []),
+            "tags": synth.get("tags", []),
             "pinned_comment": pinned_comment,
+            "metadata_warnings": synth.get("metadata_warnings", []),
+            "rationale": synth.get("rationale", ""),
         }
 
     @staticmethod
