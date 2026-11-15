@@ -149,11 +149,15 @@ class YouTubeUploader:
             "categoryId": "22", # People & Blogs
         }
 
+        eff_privacy = privacy_status.lower()
+        if publish_at:
+            eff_privacy = "private"
+
         status: Dict[str, Any] = {
-            "privacyStatus": privacy_status.lower(),
+            "privacyStatus": eff_privacy,
             "selfDeclaredMadeForKids": False,
         }
-        if publish_at and privacy_status.lower() == "private":
+        if publish_at:
             status["publishAt"] = publish_at
 
         metadata_body = {

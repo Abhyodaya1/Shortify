@@ -54,8 +54,8 @@ class CardOverlayGenerator:
     @classmethod
     def generate_tweet_card(
         cls,
-        author_name: str = "Legacy of the Brave",
-        handle: str = "@LegacyoftheBrave",
+        author_name: str = "Peak Heist Clips",
+        handle: str = "@peakheistclips",
         tweet_text: str = "Every soldier gets asked the same question at least once: 'what breathing technique do you use on long runs?'",
         output_path: str = "tweet_card.png",
         canvas_width: int = 1080,

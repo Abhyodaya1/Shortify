@@ -366,7 +366,7 @@ class YouTubeIntelligenceService:
     # 5. yt-seo: Compliant Metadata Generation
     # -------------------------------------------------------------------------
     @classmethod
-    def generate_seo_metadata(cls, topic: str, headline: str, channel_handle: str = "@AbhyodayaClips") -> Dict[str, Any]:
+    def generate_seo_metadata(cls, topic: str, headline: str, channel_handle: str = "@peakheistclips") -> Dict[str, Any]:
         """Generates high-CTR descriptions, hashtags, and targeted tags adhering to Section 11 SEO criteria."""
         clean_topic = topic.replace("#", "").strip()
         tags = [
@@ -506,7 +506,7 @@ class YouTubeIntelligenceService:
         text: str,
         hook: str,
         video_title: str = "",
-        channel_handle: str = "@AbhyodayaClips",
+        channel_handle: str = "@peakheistclips",
     ) -> Dict[str, Any]:
         """Synthesizes high-performing, non-boilerplate YouTube metadata across 5 distinct title angles.
         Adheres strictly to Jake Schincariol's yt-seo and yt-package rules:

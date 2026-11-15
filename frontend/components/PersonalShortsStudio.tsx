@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Flame,
   Clock,
+  Rocket,
   Layers,
   FileVideo,
   Copy,
@@ -57,6 +58,7 @@ import { DashboardView } from "./DashboardView";
 import { SchedulerView } from "./SchedulerView";
 import { ChannelConnectModal } from "./ChannelConnectModal";
 import { ScheduleModal } from "./ScheduleModal";
+import { BulkPublishModal } from "./BulkPublishModal";
 import { VisualStyleStudio } from "./visual-style-studio/VisualStyleStudio";
 import { DEFAULT_VISUAL_STYLE_CONFIG, VisualStyleConfig } from "./visual-style-studio/types";
 
@@ -176,6 +178,12 @@ interface ClipCandidate {
     total_duration_sec?: number;
     resolution?: string;
   };
+  is_fallback?: boolean;
+  passed_threshold?: boolean;
+  candidate_rank?: number;
+  selection_reason?: string;
+  batch_message?: string;
+  selection_mode?: string;
   layout_mode?: "split_screen" | "split_screen_comment" | "tweet_card" | "full_9_16" | "fit_ambient_blur" | "reddit_card" | "instagram_card" | "youtube_comment" | "floating" | "card" | "card_frame" | "blurred_bg" | "none" | string;
   card_type?: "none" | "reddit_card" | "tweet_card" | "instagram_card" | "youtube_comment" | string;
   background_id?: string;
@@ -226,8 +234,8 @@ export const PersonalShortsStudio: React.FC = () => {
   const [upfrontCardPosition, setUpfrontCardPosition] = useState<number>(18);
   const [upfrontCardWidth, setUpfrontCardWidth] = useState<number>(92);
   const [upfrontVoice, setUpfrontVoice] = useState<string>("en-US-ChristopherNeural");
-  const [upfrontCardAuthor, setUpfrontCardAuthor] = useState<string>("Legacy of the Brave");
-  const [upfrontCardHandle, setUpfrontCardHandle] = useState<string>("@LegacyoftheBrave");
+  const [upfrontCardAuthor, setUpfrontCardAuthor] = useState<string>("Peak Heist Clips");
+  const [upfrontCardHandle, setUpfrontCardHandle] = useState<string>("@peakheistclips");
   const [upfrontCardSubreddit, setUpfrontCardSubreddit] = useState<string>("r/AskReddit");
   const [upfrontCardBadge, setUpfrontCardBadge] = useState<string>("CA$ 14.99");
   const [visualStyleConfig, setVisualStyleConfig] = useState<VisualStyleConfig>(DEFAULT_VISUAL_STYLE_CONFIG);
@@ -289,6 +297,7 @@ export const PersonalShortsStudio: React.FC = () => {
   const [currentChannel, setCurrentChannel] = useState<any>(null);
   const [isChannelModalOpen, setIsChannelModalOpen] = useState(false);
   const [schedulingClip, setSchedulingClip] = useState<ClipCandidate | null>(null);
+  const [isBulkPublishModalOpen, setIsBulkPublishModalOpen] = useState(false);
   const [recentVideos, setRecentVideos] = useState<any[]>([
     {
       id: "vid_sanatana",
@@ -321,8 +330,8 @@ export const PersonalShortsStudio: React.FC = () => {
 
   // Feature 2: Layout mode & social overlays state
   const [selectedLayoutMode, setSelectedLayoutMode] = useState<"split_screen" | "split_screen_comment" | "tweet_card" | "fit_ambient_blur" | "full_9_16">("split_screen");
-  const [socialAuthor, setSocialAuthor] = useState<string>("Legacy of the Brave");
-  const [socialHandle, setSocialHandle] = useState<string>("@LegacyoftheBrave");
+  const [socialAuthor, setSocialAuthor] = useState<string>("Peak Heist Clips");
+  const [socialHandle, setSocialHandle] = useState<string>("@peakheistclips");
   const [socialBadge, setSocialBadge] = useState<string>("verified");
   const [socialText, setSocialText] = useState<string>("");
 
@@ -588,8 +597,8 @@ export const PersonalShortsStudio: React.FC = () => {
           background_id: (visualStyleConfig.backgroundPresetId === "minecraft" || ["floating", "card", "card_frame", "blurred", "blurred_bg"].includes(visualStyleConfig.layoutPresetId)) ? "minecraft_parkour" : selectedBgId,
           video_scale_percent: visualStyleConfig.layoutPresetId === "split_60_40" ? 60 : splitRatio,
           auto_hook: visualStyleConfig.enableVoiceHook || autoHook,
-          social_author: resolvedCardType === "none" ? undefined : (visualStyleConfig.customCardAuthor || "r/technology"),
-          social_handle: resolvedCardType === "none" ? undefined : (visualStyleConfig.customCardHandle || "@technology"),
+          social_author: resolvedCardType === "none" ? undefined : (visualStyleConfig.customCardAuthor || "Peak Heist Clips"),
+          social_handle: resolvedCardType === "none" ? undefined : (visualStyleConfig.customCardHandle || "@peakheistclips"),
           social_badge: "CA$ 14.99",
           social_text: hasRealCustomCardText ? visualStyleConfig.customCardText : undefined,
           card_vertical_position: visualStyleConfig.cardVerticalPosition,
@@ -837,6 +846,9 @@ export const PersonalShortsStudio: React.FC = () => {
     }
   };
 
+  // Filter verified rendered clips eligible for Bulk Publishing (Part C)
+  const renderedClips = clips.filter((c) => Boolean(c.rendered_video_url));
+
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
@@ -1024,7 +1036,7 @@ export const PersonalShortsStudio: React.FC = () => {
                 className="flex items-center gap-2 px-3 py-1.5 border border-primary bg-surface hover:bg-surface-container-low text-xs font-mono font-bold text-primary shadow-[2px_2px_0px_#111111] transition-all"
               >
                 <YoutubeIcon className="w-3.5 h-3.5 text-red-600" />
-                <span>{currentChannel.custom_url || "@AbhyodayaClips"}</span>
+                <span>{currentChannel.custom_url || "@peakheistclips"}</span>
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               </button>
             ) : (
@@ -1283,10 +1295,10 @@ export const PersonalShortsStudio: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <button
                         onClick={handleBatchRenderAll}
-                        disabled={isBatchRendering}
+                        disabled={isBatchRendering || clips.length === 0}
                         className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-emphasis)] hover:bg-[var(--color-secondary)] text-white text-xs font-bold shadow-xs disabled:opacity-50 transition-colors"
                       >
                         {isBatchRendering ? (
@@ -1297,9 +1309,24 @@ export const PersonalShortsStudio: React.FC = () => {
                         ) : (
                           <>
                             <Sparkles className="w-3.5 h-3.5 text-[var(--color-accent)]" />
-                            <span>Render All Clips</span>
+                            <span>Render All ({clips.length} Shorts)</span>
                           </>
                         )}
+                      </button>
+
+                      {/* Dynamic Bulk Publish & Schedule Action (Parts C & E) */}
+                      <button
+                        onClick={() => setIsBulkPublishModalOpen(true)}
+                        disabled={renderedClips.length === 0}
+                        title={
+                          renderedClips.length === 0
+                            ? "No rendered Shorts available to publish. Render clips first."
+                            : `Publish or schedule all ${renderedClips.length} rendered Shorts`
+                        }
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-xs disabled:opacity-40 transition-colors"
+                      >
+                        <Rocket className="w-3.5 h-3.5 text-white" />
+                        <span>Publish All Rendered ({renderedClips.length} Shorts)</span>
                       </button>
 
                       <a
@@ -1328,18 +1355,36 @@ export const PersonalShortsStudio: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Status Strip */}
-                  <div className="p-4 rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] flex items-center justify-between text-xs shadow-xs">
-                    <div className="flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-[var(--color-accent)]" />
-                      <span className="text-[var(--color-emphasis)]/80">
-                        {clips.length} clip candidate{clips.length === 1 ? "" : "s"} extracted with 4-vector virality breakdown.
-                      </span>
+                  {/* Batch Selection Transparency Banner (Part A) */}
+                  {clips.length > 0 && (
+                    <div className="p-3.5 rounded-lg border-2 border-primary bg-surface-container flex flex-wrap items-center justify-between gap-3 text-xs shadow-[3px_3px_0px_#111111]">
+                      <div className="flex items-center gap-3">
+                        <span
+                          className={`px-2.5 py-1 border border-primary font-mono font-bold text-[10px] uppercase tracking-wider ${
+                            clips[0]?.is_fallback
+                              ? "bg-amber-300 text-primary"
+                              : "bg-[#d5eb45] text-primary"
+                          }`}
+                        >
+                          {clips[0]?.is_fallback ? "TOP-5 FALLBACK" : "QUALIFIED (>60)"}
+                        </span>
+                        <span className="font-mono text-xs font-bold text-primary">
+                          {clips[0]?.batch_message ||
+                            (clips[0]?.is_fallback
+                              ? `No Shorts scored above 60. Showing the top ${clips.length} available candidates.`
+                              : `Selected all ${clips.length} Shorts with virality scores above 60.`)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 font-mono text-[11px] text-secondary">
+                        <span className="px-2 py-0.5 border border-primary bg-surface-container-lowest">
+                          Strict Condition: virality_score &gt; 60
+                        </span>
+                        <span className="font-bold text-primary px-2 py-0.5 border border-primary bg-[#d5eb45]/30">
+                          IST (Asia/Kolkata)
+                        </span>
+                      </div>
                     </div>
-                    <span className="text-[11px] font-bold text-[var(--color-emphasis)]">
-                      Full 1080p 60fps
-                    </span>
-                  </div>
+                  )}
                 </div>
 
                 {/* Clip Cards List */}
@@ -1357,17 +1402,26 @@ export const PersonalShortsStudio: React.FC = () => {
                         <div className="p-3 px-4 border-b-2 border-primary bg-surface-container flex flex-wrap items-center justify-between gap-2">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="px-2 py-0.5 border border-primary bg-[#d5eb45] text-primary font-mono text-[10px] font-bold uppercase tracking-wider shadow-[1px_1px_0px_#111111]">
-                              {clip.index === 1 ? "RANK #01 • TOP VIRAL CANDIDATE" : `RANK #${String(clip.index).padStart(2, "0")} • HIGH RETENTION POOL`}
+                              {clip.candidate_rank ? `RANK #${String(clip.candidate_rank).padStart(2, "0")}` : (clip.index === 1 ? "RANK #01 • TOP CANDIDATE" : `RANK #${String(clip.index).padStart(2, "0")}`)}
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 border border-primary font-mono text-[10px] font-bold uppercase tracking-wider shadow-[1px_1px_0px_#111111] ${
+                                clip.is_fallback
+                                  ? "bg-amber-300 text-primary"
+                                  : "bg-emerald-300 text-primary"
+                              }`}
+                            >
+                              {clip.is_fallback ? "TOP-5 FALLBACK" : "QUALIFIED (>60)"}
                             </span>
                             <span className="font-mono text-[10px] text-outline font-bold">
                               SOURCE TC: {Math.floor(clip.start_sec / 60)}:{String(Math.floor(clip.start_sec % 60)).padStart(2, "0")} → {Math.floor(clip.end_sec / 60)}:{String(Math.floor(clip.end_sec % 60)).padStart(2, "0")}
                             </span>
-                            <span className="px-1.5 py-0.5 border border-primary bg-surface font-mono text-[10px] font-bold">
-                              [9:16 VERTICAL]
-                            </span>
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className="px-2.5 py-0.5 border border-primary bg-surface-container-lowest text-xs font-mono font-bold text-primary flex items-center gap-1 shadow-[1px_1px_0px_#111111]">
+                            <span
+                              className="px-2.5 py-0.5 border border-primary bg-surface-container-lowest text-xs font-mono font-bold text-primary flex items-center gap-1 shadow-[1px_1px_0px_#111111]"
+                              title={clip.selection_reason || `Virality Score: ${clip.virality_score || 95}/100`}
+                            >
                               🔥 {clip.virality_breakdown?.total_virality || clip.virality_score || clip.engagement_score || 95}/100
                             </span>
                           </div>
@@ -1812,12 +1866,12 @@ export const PersonalShortsStudio: React.FC = () => {
                                   <div className="flex flex-col">
                                     <div className="flex items-center gap-1">
                                       <span className="font-sans font-bold text-xs text-white truncate max-w-[130px]">
-                                        {editingClip.social_author || "Alex Morgan"}
+                                        {editingClip.social_author || "Peak Heist Clips"}
                                       </span>
                                       <img src="/logos/twitter_verified.png" alt="Verified" className="w-3.5 h-3.5 inline-block shrink-0" />
                                     </div>
                                     <span className="font-mono text-[8px] text-neutral-400">
-                                      {editingClip.social_handle || "@example"}
+                                      {editingClip.social_handle || "@peakheistclips"}
                                     </span>
                                   </div>
                                 </div>
@@ -1834,10 +1888,10 @@ export const PersonalShortsStudio: React.FC = () => {
                                   <img src="/logos/reddit_logo.png" alt="Reddit" className="w-5 h-5 rounded-full object-cover shrink-0" />
                                   <div className="flex flex-col">
                                     <span className="font-sans font-bold text-xs text-black">
-                                      {editingClip.social_author || "r/technology"}
+                                      {editingClip.social_author || "r/peakheistclips"}
                                     </span>
                                     <span className="font-sans text-[8px] text-neutral-500">
-                                      {editingClip.social_handle || "u/example"} • 2h ago
+                                      {editingClip.social_handle || "u/peakheistclips"} • 2h ago
                                     </span>
                                   </div>
                                 </div>
@@ -1856,7 +1910,7 @@ export const PersonalShortsStudio: React.FC = () => {
                                 <div className="flex items-center justify-between mb-1">
                                   <div className="flex items-center gap-1.5">
                                     <img src="/logos/instagram_logo.png" alt="Instagram" className="w-5 h-5 rounded-xs object-cover shrink-0" />
-                                    <span className="font-sans font-bold text-xs text-white">{editingClip.social_handle || "@creator_hub"}</span>
+                                    <span className="font-sans font-bold text-xs text-white">{editingClip.social_handle || "@peakheistclips"}</span>
                                   </div>
                                   <span className="text-[8px] bg-[#0095F6] text-white px-2 py-0.5 rounded-full font-bold">Follow</span>
                                 </div>
@@ -1875,7 +1929,7 @@ export const PersonalShortsStudio: React.FC = () => {
                                 <div className="flex items-center justify-between mb-1 pb-1 border-b border-black/20">
                                   <div className="flex items-center gap-1.5">
                                     <img src="/logos/youtube_logo.png" alt="YouTube" className="w-4 h-4 object-contain shrink-0" />
-                                    <span className="font-sans text-xs font-bold">{editingClip.social_author || "Creator Fan"}</span>
+                                    <span className="font-sans text-xs font-bold">{editingClip.social_author || "Peak Heist Clips"}</span>
                                   </div>
                                   <span className="px-1.5 py-0.2 bg-black text-[#D5EB45] font-mono text-[8px] font-bold">
                                     {editingClip.social_badge || "CA$ 14.99 SUPERCHAT"}
@@ -2154,8 +2208,8 @@ export const PersonalShortsStudio: React.FC = () => {
                       onClick={() => setEditingClip({
                         ...editingClip,
                         card_type: "reddit_card",
-                        social_author: "r/technology",
-                        social_handle: "u/example",
+                        social_author: "r/peakheistclips",
+                        social_handle: "u/peakheistclips",
                       })}
                       className={`p-2 border-2 border-primary transition-all flex flex-col items-center gap-1 text-center cursor-pointer ${
                         editingClip.card_type === "reddit_card"
@@ -2173,8 +2227,8 @@ export const PersonalShortsStudio: React.FC = () => {
                       onClick={() => setEditingClip({
                         ...editingClip,
                         card_type: "tweet_card",
-                        social_author: "Alex Morgan",
-                        social_handle: "@example",
+                        social_author: "Peak Heist Clips",
+                        social_handle: "@peakheistclips",
                       })}
                       className={`p-2 border-2 border-primary transition-all flex flex-col items-center gap-1 text-center cursor-pointer ${
                         editingClip.card_type === "tweet_card" || editingClip.card_type === "twitter_card"
@@ -2192,7 +2246,7 @@ export const PersonalShortsStudio: React.FC = () => {
                       onClick={() => setEditingClip({
                         ...editingClip,
                         card_type: "instagram_card",
-                        social_handle: "@creator_hub",
+                        social_handle: "@peakheistclips",
                       })}
                       className={`p-2 border-2 border-primary transition-all flex flex-col items-center gap-1 text-center cursor-pointer ${
                         editingClip.card_type === "instagram_card"
@@ -2601,17 +2655,26 @@ export const PersonalShortsStudio: React.FC = () => {
 
                   <div>
                     <label className="font-mono text-[10px] font-bold text-primary uppercase block mb-1">
-                      Social Card Author &amp; Badge:
+                      Social Card Author, Handle &amp; Badge:
                     </label>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                       <input
                         type="text"
-                        value={editingClip.social_author || "Legacy of the Brave"}
+                        value={editingClip.social_author || "Peak Heist Clips"}
                         onChange={(e) =>
                           setEditingClip({ ...editingClip, social_author: e.target.value })
                         }
                         className="w-full p-2 border-2 border-primary bg-surface-container-lowest font-mono text-xs text-primary focus:outline-none"
                         placeholder="Author name"
+                      />
+                      <input
+                        type="text"
+                        value={editingClip.social_handle || "@peakheistclips"}
+                        onChange={(e) =>
+                          setEditingClip({ ...editingClip, social_handle: e.target.value })
+                        }
+                        className="w-full p-2 border-2 border-primary bg-surface-container-lowest font-mono text-xs text-primary focus:outline-none"
+                        placeholder="Handle e.g. @peakheistclips"
                       />
                       <input
                         type="text"
@@ -2730,6 +2793,18 @@ export const PersonalShortsStudio: React.FC = () => {
                 }
               : null
           );
+        }}
+      />
+
+      <BulkPublishModal
+        isOpen={isBulkPublishModalOpen}
+        onClose={() => setIsBulkPublishModalOpen(false)}
+        clips={clips}
+        renderedClips={renderedClips}
+        currentChannel={currentChannel}
+        onSuccess={() => {
+          fetchChannelStatus();
+          setActiveMainView("scheduler");
         }}
       />
     </div>

@@ -133,14 +133,14 @@ class PersistentScheduler:
 
     @classmethod
     def connect_sandbox_channel(cls, user_id: str = "default_user") -> Dict[str, Any]:
-        """Connects a simulated/sandbox channel for Abhyodaya so everything works out of the box."""
+        """Connects a simulated/sandbox channel for Peak Heist Clips so everything works out of the box."""
         cls.init_db()
         channel_data = {
-            "channel_id": "UC_abhyodaya_clips_sandbox",
+            "channel_id": "UC_peakheistclips_sandbox",
             "user_id": user_id,
-            "channel_title": "Abhyodaya Singh Clips",
-            "custom_url": "@AbhyodayaClips",
-            "thumbnail_url": "https://api.dicebear.com/7.x/bottts/svg?seed=AbhyodayaClips",
+            "channel_title": "Peak Heist Clips",
+            "custom_url": "@peakheistclips",
+            "thumbnail_url": "https://api.dicebear.com/7.x/bottts/svg?seed=peakheistclips",
             "subscriber_count": 24500,
             "video_count": 14,
             "is_sandbox": 1,
@@ -195,6 +195,18 @@ class PersistentScheduler:
             pass
 
         import uuid
+        from .timezone_service import TimezoneService
+
+        # Normalize incoming schedule time (naive IST or ISO) to UTC RFC 3339
+        try:
+            utc_scheduled_time = TimezoneService.to_utc_iso(scheduled_time)
+            ist_display = TimezoneService.format_ist_display(utc_scheduled_time)
+            ist_iso = TimezoneService.utc_to_ist_iso(utc_scheduled_time)
+        except Exception:
+            utc_scheduled_time = scheduled_time
+            ist_display = scheduled_time
+            ist_iso = scheduled_time
+
         job_id = f"job_{uuid.uuid4().hex[:10]}"
         now_str = datetime.now(timezone.utc).isoformat()
         tags_str = json.dumps(tags)
@@ -206,7 +218,7 @@ class PersistentScheduler:
             (job_id, clip_id, title, description, tags, video_file_path, thumbnail_url, target_channel_id, scheduled_time, visibility, status, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?)
             """, (
-                job_id, clip_id, title, description, tags_str, eff_video_path, thumbnail_url, target_channel_id, scheduled_time, visibility, now_str
+                job_id, clip_id, title, description, tags_str, eff_video_path, thumbnail_url, target_channel_id, utc_scheduled_time, visibility, now_str
             ))
 
         return {
@@ -215,7 +227,10 @@ class PersistentScheduler:
             "title": title,
             "description": description,
             "tags": tags,
-            "scheduled_time": scheduled_time,
+            "scheduled_time": utc_scheduled_time,
+            "scheduled_time_utc": utc_scheduled_time,
+            "scheduled_time_ist": ist_iso,
+            "display_ist": ist_display,
             "status": "scheduled",
             "visibility": visibility,
         }
@@ -223,6 +238,7 @@ class PersistentScheduler:
     @classmethod
     def list_scheduled_uploads(cls, channel_id: Optional[str] = None) -> List[Dict[str, Any]]:
         cls.init_db()
+        from .timezone_service import TimezoneService
         with cls._get_connection() as conn:
             cur = conn.cursor()
             if channel_id:
@@ -237,6 +253,14 @@ class PersistentScheduler:
                     item["tags"] = json.loads(item["tags"]) if item.get("tags") else []
                 except Exception:
                     item["tags"] = []
+                # Provide explicit IST fields alongside UTC
+                item["scheduled_time_utc"] = item.get("scheduled_time", "")
+                try:
+                    item["scheduled_time_ist"] = TimezoneService.utc_to_ist_iso(item["scheduled_time"])
+                    item["display_ist"] = TimezoneService.format_ist_display(item["scheduled_time"])
+                except Exception:
+                    item["scheduled_time_ist"] = item.get("scheduled_time", "")
+                    item["display_ist"] = item.get("scheduled_time", "")
                 results.append(item)
             return results
 
@@ -292,6 +316,14 @@ class PersistentScheduler:
                     res["tags"] = json.loads(res["tags"]) if res.get("tags") else []
                 except Exception:
                     res["tags"] = []
+                res["scheduled_time_utc"] = res.get("scheduled_time", "")
+                try:
+                    from .timezone_service import TimezoneService
+                    res["scheduled_time_ist"] = TimezoneService.utc_to_ist_iso(res["scheduled_time"])
+                    res["display_ist"] = TimezoneService.format_ist_display(res["scheduled_time"])
+                except Exception:
+                    res["scheduled_time_ist"] = res.get("scheduled_time", "")
+                    res["display_ist"] = res.get("scheduled_time", "")
                 return res
             return None
 

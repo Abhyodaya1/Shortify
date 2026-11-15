@@ -43,8 +43,8 @@ class DiscoverClipsRequest(BaseModel):
     background_id: Optional[str] = Field(default="minecraft_parkour", description="Background video ID")
     video_scale_percent: int = Field(default=48, description="Main video height percent (30-80)")
     auto_hook: bool = Field(default=False, description="Enable opening AI voiceover hook by default")
-    social_author: Optional[str] = Field(default="Motion Creator", description="Social author name")
-    social_handle: Optional[str] = Field(default="@motioncreator", description="Social handle")
+    social_author: Optional[str] = Field(default="Peak Heist Clips", description="Social author name")
+    social_handle: Optional[str] = Field(default="@peakheistclips", description="Social handle")
     social_badge: Optional[str] = Field(default="verified", description="Verified or currency badge")
     social_text: Optional[str] = Field(default=None, description="Custom social / comment card text")
     card_vertical_position: Optional[int] = Field(default=20, description="Card vertical position percent (10-85)")
@@ -79,8 +79,8 @@ class RenderClipRequest(BaseModel):
     custom_animation: Optional[str] = Field(default=None, description="Animation type: word_pop, glow_pulse, fade_in, slide_up, karaoke")
     custom_all_caps: Optional[bool] = Field(default=None, description="Force uppercase text")
     custom_outline_width: Optional[float] = Field(default=None, description="Custom stroke thickness")
-    social_author: Optional[str] = Field(default="Motion Creator", description="Social author name")
-    social_handle: Optional[str] = Field(default="@motioncreator", description="Social handle")
+    social_author: Optional[str] = Field(default="Peak Heist Clips", description="Social author name")
+    social_handle: Optional[str] = Field(default="@peakheistclips", description="Social handle")
     social_badge: Optional[str] = Field(default="verified", description="Verified or currency badge")
     social_text: Optional[str] = Field(default=None, description="Custom social / comment card text")
     card_vertical_position: Optional[int] = Field(default=20, description="Card vertical position percent (10-85)")
@@ -212,10 +212,19 @@ async def discover_clips(payload: DiscoverClipsRequest):
         clip["subtitle_vertical_position"] = payload.subtitle_vertical_position
         discovered_clips[clip["clip_id"]] = clip
 
+    batch_msg = clips[0].get("batch_message") if clips else "No Shorts candidates found."
+    sel_mode = clips[0].get("selection_mode", "empty") if clips else "empty"
+    is_fb = clips[0].get("is_fallback", False) if clips else False
+    qual_cnt = clips[0].get("qualifying_count", 0) if clips else 0
+
     return {
         "video_id": payload.video_id,
         "duration_mode": payload.duration_mode,
         "total_clips_found": len(clips),
+        "batch_message": batch_msg,
+        "selection_mode": sel_mode,
+        "is_fallback": is_fb,
+        "qualifying_count": qual_cnt,
         "profile_snapshot": active_profile.snapshot(),
         "clips": clips,
     }

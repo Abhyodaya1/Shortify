@@ -5,6 +5,7 @@ Provides endpoints for channel connection (Sandbox & OAuth), video import, and s
 from __future__ import annotations
 import os
 from pathlib import Path
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
@@ -28,8 +29,44 @@ class ScheduleUploadRequest(BaseModel):
     video_file_path: str = ""
     thumbnail_url: str = ""
     scheduled_time: str
-    target_channel_id: str = "UC_abhyodaya_clips_sandbox"
+    target_channel_id: str = "UC_peakheistclips_sandbox"
     visibility: str = "unlisted"
+
+
+class BulkPublishItem(BaseModel):
+    clip_id: str
+    title: str
+    description: str = ""
+    tags: List[str] = Field(default_factory=list)
+    video_file_path: str = ""
+    thumbnail_url: str = ""
+    visibility: str = "unlisted"
+    target_channel_id: str = "UC_peakheistclips_sandbox"
+
+
+class BulkPublishRequest(BaseModel):
+    items: List[BulkPublishItem]
+    user_id: str = "default_user"
+
+
+class BulkScheduleItem(BaseModel):
+    clip_id: str
+    title: str
+    description: str = ""
+    tags: List[str] = Field(default_factory=list)
+    video_file_path: str = ""
+    thumbnail_url: str = ""
+    scheduled_time: str
+    target_channel_id: str = "UC_peakheistclips_sandbox"
+    visibility: str = "unlisted"
+
+
+class BulkScheduleRequest(BaseModel):
+    items: List[BulkScheduleItem]
+    start_time_ist: Optional[str] = None
+    interval_minutes: Optional[int] = None
+    target_channel_id: Optional[str] = None
+    visibility: Optional[str] = None
 
 
 @router.get("/status", summary="Get YouTube channel connection status")
@@ -131,7 +168,7 @@ def connect_sandbox(user_id: str = "default_user"):
     return {
         "status": "connected",
         "channel": channel,
-        "message": "Connected @AbhyodayaClips (Sandbox) successfully!",
+        "message": "Connected @peakheistclips (Sandbox) successfully!",
     }
 
 
@@ -215,6 +252,167 @@ def schedule_upload(payload: ScheduleUploadRequest):
     return {"status": "success", "scheduled_job": res}
 
 
+@router.post("/bulk-publish", summary="Bulk Publish All Rendered Shorts")
+async def bulk_publish(payload: BulkPublishRequest):
+    """Publishes all provided rendered Shorts sequentially with independent failure isolation."""
+    from ..services.youtube_uploader import YouTubeUploader
+
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="No clips provided for bulk publishing.")
+
+    published = []
+    failed = []
+
+    for item in payload.items:
+        try:
+            # 1. Verify output file exists and has size > 1000 bytes
+            try:
+                resolved_file = YouTubeUploader.resolve_video_file(
+                    video_path=item.video_file_path,
+                    clip_id=item.clip_id,
+                )
+                if not resolved_file.exists() or resolved_file.stat().st_size < 1000:
+                    raise FileNotFoundError(f"Rendered video for clip {item.clip_id} is incomplete or missing on disk.")
+            except Exception as fe:
+                failed.append({
+                    "clip_id": item.clip_id,
+                    "title": item.title,
+                    "error": str(fe),
+                })
+                continue
+
+            # 2. Schedule immediate job or retrieve existing
+            sched_res = PersistentScheduler.schedule_clip_upload(
+                clip_id=item.clip_id,
+                title=item.title,
+                description=item.description,
+                tags=item.tags,
+                video_file_path=str(resolved_file),
+                scheduled_time=datetime.now(timezone.utc).isoformat(),
+                target_channel_id=item.target_channel_id,
+                visibility=item.visibility,
+                thumbnail_url=item.thumbnail_url,
+            )
+
+            job_id = sched_res["job_id"]
+            # 3. Trigger publish with atomic locking & failure handling
+            pub_res = await PersistentScheduler.trigger_publish(job_id)
+            published.append({
+                "clip_id": item.clip_id,
+                "job_id": job_id,
+                "title": item.title,
+                "youtube_url": pub_res.get("youtube_url", ""),
+                "status": "published",
+            })
+        except Exception as e:
+            failed.append({
+                "clip_id": item.clip_id,
+                "title": item.title,
+                "error": str(e),
+            })
+
+    return {
+        "status": "completed",
+        "total_requested": len(payload.items),
+        "published_count": len(published),
+        "failed_count": len(failed),
+        "published": published,
+        "failed": failed,
+    }
+
+
+@router.post("/bulk-schedule", summary="Bulk Schedule Shorts with Indian Standard Time (IST)")
+def bulk_schedule(payload: BulkScheduleRequest):
+    """Schedules multiple Shorts using IST (Asia/Kolkata), converting each to UTC instant."""
+    from ..services.timezone_service import TimezoneService
+
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="No items provided for bulk scheduling.")
+
+    # If start_time_ist and interval_minutes provided, generate sequence
+    if payload.start_time_ist and payload.interval_minutes:
+        scheduled_timestamps = TimezoneService.generate_bulk_ist_schedule(
+            start_ist=payload.start_time_ist,
+            count=len(payload.items),
+            interval_minutes=payload.interval_minutes,
+        )
+        for idx, item in enumerate(payload.items):
+            if idx < len(scheduled_timestamps):
+                item.scheduled_time = scheduled_timestamps[idx]["utc_iso"]
+
+    created_jobs = []
+    errors = []
+
+    for item in payload.items:
+        try:
+            # Validate future time in IST
+            is_valid, msg = TimezoneService.validate_future_ist(item.scheduled_time, min_minutes_ahead=1)
+            # Normalize to UTC
+            utc_iso = TimezoneService.to_utc_iso(item.scheduled_time)
+            eff_channel = payload.target_channel_id or item.target_channel_id
+            eff_vis = payload.visibility or item.visibility
+
+            job = PersistentScheduler.schedule_clip_upload(
+                clip_id=item.clip_id,
+                title=item.title,
+                description=item.description,
+                tags=item.tags,
+                video_file_path=item.video_file_path,
+                scheduled_time=utc_iso,
+                target_channel_id=eff_channel,
+                visibility=eff_vis,
+                thumbnail_url=item.thumbnail_url,
+            )
+            created_jobs.append(job)
+        except Exception as e:
+            errors.append({"clip_id": item.clip_id, "error": str(e)})
+
+    return {
+        "status": "success",
+        "total_scheduled": len(created_jobs),
+        "failed_count": len(errors),
+        "jobs": created_jobs,
+        "errors": errors,
+        "timezone": "Asia/Kolkata",
+        "display_timezone": "Indian Standard Time (IST — Asia/Kolkata)",
+    }
+
+
+@router.get("/batch-status", summary="Get status across batch of Shorts (rendering, scheduling, publishing)")
+def get_batch_status():
+    """Returns aggregated status for all clips: verified renders, scheduled, uploading, published, failed."""
+    jobs = PersistentScheduler.list_scheduled_uploads()
+
+    # Search storage for verified rendered files
+    renders_dirs = [
+        Path("backend/storage/renders"),
+        Path("storage/renders"),
+    ]
+    verified_renders = []
+    for d in renders_dirs:
+        if d.exists():
+            for p in d.glob("*.mp4"):
+                if p.stat().st_size > 1000:
+                    verified_renders.append(p.name)
+
+    scheduled = [j for j in jobs if j.get("status") == "scheduled"]
+    uploading = [j for j in jobs if j.get("status") == "uploading"]
+    published = [j for j in jobs if j.get("status") == "published"]
+    failed = [j for j in jobs if j.get("status") == "failed"]
+
+    return {
+        "total_jobs": len(jobs),
+        "verified_rendered_files_count": len(verified_renders),
+        "verified_rendered_files": verified_renders,
+        "scheduled_count": len(scheduled),
+        "uploading_count": len(uploading),
+        "published_count": len(published),
+        "failed_count": len(failed),
+        "timezone": "Asia/Kolkata",
+        "display_timezone": "Indian Standard Time (IST — Asia/Kolkata)",
+    }
+
+
 @router.get("/queue", summary="List scheduled and published upload queue")
 def list_upload_queue(channel_id: Optional[str] = None):
     """Returns the persistent queue of scheduled and published YouTube Shorts."""
@@ -276,7 +474,7 @@ class LintPackagingRequest(BaseModel):
 class GenerateSeoRequest(BaseModel):
     topic: str
     headline: str
-    channel_handle: str = "@AbhyodayaClips"
+    channel_handle: str = "@peakheistclips"
 
 
 @router.post("/intel/score-hook", summary="Deterministic Hook Scoring (yt-script)")

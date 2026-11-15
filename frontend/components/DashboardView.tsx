@@ -92,7 +92,7 @@ export function DashboardView({
             </div>
             <p className="font-mono text-xs text-outline-variant truncate mt-1">
               {currentChannel
-                ? `${currentChannel.custom_url || "@AbhyodayaClips"} • Auto-publishing queue active & quota protected`
+                ? `${currentChannel.custom_url || "@peakheistclips"} • Auto-publishing queue active & quota protected`
                 : "Connect your channel to import long-form videos directly and publish scheduled vertical Shorts"}
             </p>
           </div>

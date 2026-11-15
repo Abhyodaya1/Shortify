@@ -75,11 +75,11 @@ class SmartClipSelector:
         # 2. Filter overlapping candidates (>10s overlap)
         filtered_candidates = cls._filter_overlapping(raw_candidates)
 
-        # 3. Score candidates with LLM + 21 Hook Formulas
+        # 3. Score all candidates with LLM + 21 Hook Formulas
         processed_clips = []
         llm = get_llm_provider()
 
-        for idx, cand in enumerate(filtered_candidates[:6]):
+        for idx, cand in enumerate(filtered_candidates):
             clip_id = str(uuid4())[:8]
 
             # A. Hook generation and headline evaluation via Roles 02 & 03
@@ -179,9 +179,107 @@ class SmartClipSelector:
                 "profile_snapshot": active_profile.snapshot(),
             })
 
-        # Rank by overall weighted engagement score
-        ranked = sorted(processed_clips, key=lambda x: x["engagement_score"], reverse=True)
-        return ranked
+        # Apply dynamic shorts selection (virality_score > 60, top-5 fallback)
+        selection_result = cls.apply_dynamic_selection(processed_clips)
+        return selection_result["selected_clips"]
+
+    @classmethod
+    def apply_dynamic_selection(
+        cls,
+        candidates: List[Dict[str, Any]],
+        virality_threshold: int = 60,
+        fallback_top_k: int = 5,
+    ) -> Dict[str, Any]:
+        """Dynamically selects Shorts candidates based on virality threshold (> 60).
+
+        Rules:
+        1. Qualifying condition is strictly virality_score > 60 (score of 60 does NOT qualify).
+        2. If qualifying candidates exist: select ALL qualifying candidates (no upper cap: 2, 3, 5, 8, 10...).
+        3. If ZERO candidates exceed 60: select top 5 highest-scoring valid candidates (or all available if < 5).
+        4. If even one candidate exceeds 60: select all exceeding 60 (never pad with lower-scoring candidates).
+        5. Never fabricate clips or artificially inflate scores.
+        6. Selection transparency: annotate each clip with virality_score, candidate_rank,
+           passed_threshold, is_fallback, selection_reason, batch_message.
+        """
+        if not candidates:
+            return {
+                "selected_clips": [],
+                "selection_mode": "empty",
+                "batch_message": "No Shorts candidates found.",
+                "qualifying_count": 0,
+                "total_evaluated": 0,
+                "is_fallback": False,
+            }
+
+        # Sort all evaluated candidates descending by virality_score (or engagement_score)
+        sorted_candidates = sorted(
+            candidates,
+            key=lambda x: (
+                float(x.get("virality_score", x.get("engagement_score", 0))),
+                float(x.get("hook_score", 0))
+            ),
+            reverse=True,
+        )
+
+        # Assign 1-based candidate_rank across all evaluated candidates
+        for rank_idx, cand in enumerate(sorted_candidates):
+            cand["candidate_rank"] = rank_idx + 1
+
+        # Strict condition: virality_score > 60 (score of 60 does NOT qualify)
+        qualifying = [
+            c for c in sorted_candidates
+            if float(c.get("virality_score", c.get("engagement_score", 0))) > float(virality_threshold)
+        ]
+
+        if len(qualifying) > 0:
+            selected = qualifying
+            is_fallback = False
+            selection_mode = "threshold"
+            batch_message = f"Selected all {len(selected)} Shorts with virality scores above {virality_threshold}."
+            for clip in selected:
+                v_score = int(round(float(clip.get("virality_score", clip.get("engagement_score", 0)))))
+                clip["passed_threshold"] = True
+                clip["is_fallback"] = False
+                clip["selection_reason"] = (
+                    f"Virality score {v_score}/100 exceeds qualification threshold of {virality_threshold}."
+                )
+        else:
+            selected = sorted_candidates[:min(fallback_top_k, len(sorted_candidates))]
+            is_fallback = True
+            selection_mode = "fallback"
+            batch_message = f"No Shorts scored above {virality_threshold}. Showing the top {len(selected)} available candidates."
+            for clip in selected:
+                v_score = int(round(float(clip.get("virality_score", clip.get("engagement_score", 0)))))
+                clip["passed_threshold"] = False
+                clip["is_fallback"] = True
+                clip["selection_reason"] = (
+                    f"Top-{clip['candidate_rank']} fallback candidate (virality score {v_score}/100)."
+                )
+
+        # Re-index selected clips 1 to N and format titles
+        for idx, clip in enumerate(selected):
+            clip["index"] = idx + 1
+            headline = (
+                clip.get("visual_headline")
+                or clip.get("headline")
+                or clip.get("main_topic")
+                or "Short"
+            )
+            clean_head = headline.strip('". ')
+            clip["title"] = f"#{idx + 1} {clean_head}"
+            clip["batch_message"] = batch_message
+            clip["selection_mode"] = selection_mode
+            clip["qualifying_count"] = len(qualifying)
+            clip["total_evaluated_count"] = len(candidates)
+
+        return {
+            "selected_clips": selected,
+            "selection_mode": selection_mode,
+            "batch_message": batch_message,
+            "qualifying_count": len(qualifying),
+            "total_evaluated": len(candidates),
+            "is_fallback": is_fallback,
+        }
 
     @classmethod
     def _find_duration_targeted_spans(

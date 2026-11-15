@@ -45,9 +45,10 @@ export function ScheduleModal({
   onMetadataUpdate,
 }: ScheduleModalProps) {
   const [scheduledDate, setScheduledDate] = useState<string>(() => {
-    const d = new Date();
-    d.setHours(d.getHours() + 2);
-    return d.toISOString().slice(0, 16);
+    // Current IST instant + 2 hours default lead
+    const now = new Date();
+    const istTime = new Date(now.getTime() + (5.5 + 2) * 3600 * 1000);
+    return istTime.toISOString().slice(0, 16);
   });
   const [visibility, setVisibility] = useState<"public" | "unlisted" | "private">("unlisted");
   const [title, setTitle] = useState<string>("");
@@ -153,10 +154,10 @@ export function ScheduleModal({
   useEffect(() => {
     if (!isOpen || !clip) return;
 
-    // Reset default schedule time to 2 hours from now
-    const d = new Date();
-    d.setHours(d.getHours() + 2);
-    setScheduledDate(d.toISOString().slice(0, 16));
+    // Reset default schedule time to 2 hours from now in IST
+    const now = new Date();
+    const istTime = new Date(now.getTime() + (5.5 + 2) * 3600 * 1000);
+    setScheduledDate(istTime.toISOString().slice(0, 16));
 
     // Detect if current clip description is stale legacy boilerplate or category mismatch
     const isStaleDesc =
@@ -211,7 +212,7 @@ export function ScheduleModal({
           video_file_path: clip.rendered_video_url || `short_${clip.clip_id}.mp4`,
           thumbnail_url: clip.preview_url || "",
           scheduled_time: scheduledDate,
-          target_channel_id: currentChannel?.channel_id || "UC_abhyodaya_clips_sandbox",
+          target_channel_id: currentChannel?.channel_id || "UC_peakheistclips_sandbox",
           visibility: visibility,
         }),
       });
@@ -244,7 +245,7 @@ export function ScheduleModal({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="font-headline font-bold text-sm uppercase tracking-tight text-primary">
-                  Schedule YouTube Short
+                  Schedule YouTube Short — IST (Asia/Kolkata)
                 </h3>
                 <span className="font-mono text-[10px] px-1.5 py-0.2 bg-[#d5eb45] border border-primary font-bold flex items-center gap-1">
                   <Sparkles className="w-2.5 h-2.5" />
@@ -270,16 +271,16 @@ export function ScheduleModal({
           <div className="p-3 bg-surface-container-low border-2 border-primary shadow-[2px_2px_0px_#111111] flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <img
-                src={currentChannel?.thumbnail_url || "https://api.dicebear.com/7.x/bottts/svg?seed=AbhyodayaClips"}
+                src={currentChannel?.thumbnail_url || "https://api.dicebear.com/7.x/bottts/svg?seed=peakheistclips"}
                 alt=""
                 className="w-8 h-8 border border-primary shadow-[1px_1px_0px_#111111] object-cover"
               />
               <div>
                 <span className="font-headline font-bold text-xs uppercase text-primary block">
-                  {currentChannel?.channel_title || "Abhyodaya Singh Clips"}
+                  {currentChannel?.channel_title || "Peak Heist Clips"}
                 </span>
                 <span className="font-mono text-[10px] text-outline">
-                  {currentChannel?.custom_url || "@AbhyodayaClips"} • Quota Protected
+                  {currentChannel?.custom_url || "@peakheistclips"} • Quota Protected
                 </span>
               </div>
             </div>
@@ -401,7 +402,7 @@ export function ScheduleModal({
             <div className="space-y-1">
               <label className="font-mono text-xs font-bold text-primary uppercase flex items-center gap-1.5">
                 <Calendar className="w-3.5 h-3.5 text-primary" />
-                <span>Publish Time (Local)</span>
+                <span>Publish Time — Indian Standard Time (IST — Asia/Kolkata)</span>
               </label>
               <input
                 type="datetime-local"
@@ -409,6 +410,9 @@ export function ScheduleModal({
                 onChange={(e) => setScheduledDate(e.target.value)}
                 className="w-full px-3 py-2 border-2 border-primary bg-surface-container-lowest font-mono text-xs text-primary focus:outline-none focus:shadow-[2px_2px_0px_#111111]"
               />
+              <span className="font-mono text-[9px] text-secondary font-bold block mt-0.5">
+                Indian Standard Time (UTC+05:30) • Converted to UTC instant for YouTube publishing
+              </span>
             </div>
 
             {/* Visibility */}

@@ -527,8 +527,8 @@ class MasterTimelineCompositor:
             else: # is_tweet
                 card_overlay_path = out_dir / "tweet_card.png"
                 CardOverlayGenerator.generate_tweet_card(
-                    author_name=social_author or "Legacy of the Brave",
-                    handle=social_handle or "@LegacyoftheBrave",
+                    author_name=social_author or "Peak Heist Clips",
+                    handle=social_handle or "@peakheistclips",
                     tweet_text=c_text,
                     output_path=str(card_overlay_path),
                     canvas_width=target_width,

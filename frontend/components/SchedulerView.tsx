@@ -216,16 +216,16 @@ export function SchedulerView({
           </div>
           <div className="flex items-center gap-2.5 pt-1">
             <img
-              src={currentChannel?.thumbnail_url || "https://api.dicebear.com/7.x/bottts/svg?seed=AbhyodayaClips"}
+              src={currentChannel?.thumbnail_url || "https://api.dicebear.com/7.x/bottts/svg?seed=peakheistclips"}
               alt=""
               className="w-9 h-9 border border-primary shadow-[1px_1px_0px_#111111] object-cover"
             />
             <div className="truncate min-w-0">
               <span className="font-headline font-bold text-xs text-primary block truncate">
-                {currentChannel?.channel_title || "Abhyodaya Singh Clips"}
+                {currentChannel?.channel_title || "Peak Heist Clips"}
               </span>
               <span className="font-mono text-[11px] text-outline truncate block">
-                {currentChannel?.custom_url || "@AbhyodayaClips"}
+                {currentChannel?.custom_url || "@peakheistclips"}
               </span>
             </div>
           </div>
