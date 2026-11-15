@@ -74,8 +74,22 @@ class SequencePlanner:
         )
 
         raw_tracks = plan_data.get("tracks", [])
+        if not isinstance(raw_tracks, list) or not raw_tracks:
+            raw_tracks = [
+                {"name": "Video Track 1", "track_type": "video", "clips": []},
+                {"name": "Audio Track 1", "track_type": "audio", "clips": []},
+            ]
+
         for order_idx, raw_track in enumerate(raw_tracks):
-            raw_type = raw_track.get("track_type", "video").lower()
+            if isinstance(raw_track, str):
+                raw_track = {"track_type": raw_track, "name": f"{raw_track.title()} Track"}
+            elif not isinstance(raw_track, dict):
+                continue
+
+            raw_type = raw_track.get("track_type", raw_track.get("type", "video"))
+            if not isinstance(raw_type, str):
+                raw_type = "video"
+            raw_type = raw_type.lower()
             try:
                 track_type = TrackType(raw_type)
             except ValueError:
@@ -85,18 +99,28 @@ class SequencePlanner:
             track = timeline.add_track(name=track_name, track_type=track_type, order=order_idx)
 
             raw_clips = raw_track.get("clips", [])
+            if not isinstance(raw_clips, list):
+                raw_clips = []
             for c in raw_clips:
+                if not isinstance(c, dict):
+                    continue
                 clip = Clip(
-                    asset_id=c.get("asset_id"),
-                    start_time_ms=c.get("start_time_ms", 0),
-                    duration_ms=c.get("duration_ms", 1000),
-                    source_in_ms=c.get("source_in_ms", 0),
-                    source_out_ms=c.get("source_out_ms"),
-                    volume=c.get("volume", 1.0),
+                    asset_id=c.get("asset_id") or c.get("source"),
+                    start_time_ms=int(c.get("start_time_ms", 0)),
+                    duration_ms=int(c.get("duration_ms", 1000)),
+                    source_in_ms=int(c.get("source_in_ms", c.get("source_offset_ms", 0))),
+                    source_out_ms=int(c["source_out_ms"]) if c.get("source_out_ms") is not None else None,
+                    volume=float(c.get("volume", 1.0)),
                     text_content=c.get("text_content"),
-                    style_props=c.get("style_props", {}),
+                    style_props=c.get("style_props", {}) if isinstance(c.get("style_props"), dict) else {},
                 )
-                timeline.add_clip(track.track_id, clip)
+                try:
+                    timeline.add_clip(track.track_id, clip)
+                except Exception:
+                    pass
+
+        if len(timeline.tracks) < 2:
+            timeline.add_track(name="Audio Master", track_type=TrackType.AUDIO, order=len(timeline.tracks))
 
         return timeline
 

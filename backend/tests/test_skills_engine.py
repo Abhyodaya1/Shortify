@@ -117,3 +117,29 @@ class TestViralSwipeMetricsSkill:
         assert YouTubeIntelligenceService.classify_hook_formula("Stop making this mistake") == "Negative Constraint"
         assert YouTubeIntelligenceService.classify_hook_formula("The secret nobody talks about") == "Curiosity Gap"
         assert YouTubeIntelligenceService.classify_hook_formula("I tried this for 30 days") == "Specific Number / Timeline"
+
+
+class TestTrendingAndAudioIntelligenceSkill:
+    """Tests for Stage C compliant audio recommendations and content trends."""
+
+    def test_audio_trend_recommendation_compliance(self):
+        result = YouTubeIntelligenceService.recommend_trending_audio(
+            niche="AI Technology",
+            mood="energetic",
+            pacing="fast",
+        )
+        assert result["target_mood"] == "energetic"
+        assert len(result["recommended_tracks"]) >= 3
+        # Ensure royalty free track supports direct insertion
+        rf_track = next(t for t in result["recommended_tracks"] if "YouTube Audio Library" in t["artist"])
+        assert rf_track["auto_insertion_supported"] is True
+        # Ensure commercial track requires manual mobile selection workflow
+        comm_track = next(t for t in result["recommended_tracks"] if not t["auto_insertion_supported"])
+        assert "manual_workflow_instructions" in comm_track
+        assert "compliance_notice" in result
+
+    def test_content_trends_analysis(self):
+        trends = YouTubeIntelligenceService.analyze_trending_topics("creator economy")
+        assert len(trends["recommended_formats"]) >= 2
+        assert any("Split-Screen" in f["format_name"] for f in trends["recommended_formats"])
+        assert len(trends["top_hashtags"]) >= 3

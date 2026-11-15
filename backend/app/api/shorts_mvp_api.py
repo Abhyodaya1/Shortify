@@ -4,6 +4,7 @@ Conforms to 03_IMPLEMENTATION_SPEC.md.
 
 from __future__ import annotations
 import os
+import re
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query, status
@@ -608,3 +609,21 @@ def get_video_clips(video_id: str):
         "total_clips": len(clips),
         "clips": clips,
     }
+
+
+@router.get("/intelligence/audio-trends", summary="Legally compliant audio trend recommendations (Stage C)")
+def get_audio_trends(
+    niche: str = Query(default="general", description="Content niche or category"),
+    mood: str = Query(default="energetic", description="Desired mood: energetic, focused, calm, viral"),
+    pacing: str = Query(default="fast", description="Desired pacing: fast, medium, slow"),
+):
+    from ..services.youtube_intelligence_service import YouTubeIntelligenceService
+    return YouTubeIntelligenceService.recommend_trending_audio(niche=niche, mood=mood, pacing=pacing)
+
+
+@router.get("/intelligence/content-trends", summary="Shorts format and retention trends (Stage C)")
+def get_content_trends(
+    niche: str = Query(default="creator economy", description="Content niche"),
+):
+    from ..services.youtube_intelligence_service import YouTubeIntelligenceService
+    return YouTubeIntelligenceService.analyze_trending_topics(niche=niche)
