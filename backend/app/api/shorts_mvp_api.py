@@ -19,12 +19,13 @@ from ..services.quality_assurance import QualityAssuranceEngine
 from ..services.timeline_compositor import MasterTimelineCompositor
 from ..storage.profile_store import ProfileStore
 from ..storage.dataset_store import DatasetStore, ClipFeedbackSubmission
+from ..storage.session_store import SessionStore, SessionVideosProxy, SessionClipsProxy
 
 router = APIRouter(prefix="/api/v1/shorts", tags=["Personal Shorts MVP"])
 
-# In-memory session storage for active videos and clips
-ingested_videos: Dict[str, Dict[str, Any]] = {}
-discovered_clips: Dict[str, Dict[str, Any]] = {}
+# SQLite-backed persistent session storage for active videos and clips (REL-02)
+ingested_videos = SessionVideosProxy()
+discovered_clips = SessionClipsProxy()
 face_reframer = FaceTrackingReframer()
 
 
@@ -392,6 +393,7 @@ async def render_clip(payload: RenderClipRequest):
 
     clip["rendered_file"] = str(public_preview_path.resolve())
     clip["render_report"] = report
+    discovered_clips[payload.clip_id] = clip
 
     packaging = report.get("packaging", {})
     recommended_titles = packaging.get("titles", [])
@@ -561,3 +563,48 @@ def download_short(filename: str):
     if not target_path.is_file():
         raise HTTPException(status_code=404, detail="Requested video file does not exist")
     return FileResponse(str(target_path), media_type="video/mp4", filename=clean_filename)
+
+
+@router.get("/sessions", summary="Get active session summary including persistent videos and clips")
+def get_session_summary():
+    """Returns persistent session summary for restoring user state after browser refresh or server restart."""
+    videos = SessionStore.list_videos()
+    clips = SessionStore.list_clips()
+    return {
+        "status": "success",
+        "total_videos": len(videos),
+        "total_clips": len(clips),
+        "videos": [
+            {
+                "video_id": v.get("video_id"),
+                "title": v.get("title"),
+                "duration_sec": v.get("duration_sec"),
+                "thumbnail": v.get("thumbnail"),
+                "cue_count": len(v.get("transcript_cues", [])),
+            }
+            for v in videos
+        ],
+        "clips": [
+            {
+                "clip_id": c.get("clip_id"),
+                "parent_video_id": c.get("parent_video_id"),
+                "title": c.get("title"),
+                "start_sec": c.get("start_sec"),
+                "end_sec": c.get("end_sec"),
+                "rendered_file": c.get("rendered_file"),
+            }
+            for c in clips
+        ],
+    }
+
+
+@router.get("/sessions/videos/{video_id}/clips", summary="List persistent clips discovered for a video")
+def get_video_clips(video_id: str):
+    if not SessionStore.has_video(video_id):
+        raise HTTPException(status_code=404, detail="Video not found in persistent session")
+    clips = SessionStore.list_clips(parent_video_id=video_id)
+    return {
+        "video_id": video_id,
+        "total_clips": len(clips),
+        "clips": clips,
+    }
