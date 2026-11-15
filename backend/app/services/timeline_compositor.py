@@ -22,6 +22,7 @@ from .editorial_orchestrator import EditorialOrchestrator
 from .tts_engine import TTSManager
 from .kinetic_subtitle_compiler import KineticSubtitleCompiler, SubtitleQAService
 from .card_overlay_generator import CardOverlayGenerator
+from .youtube_intelligence_service import YouTubeIntelligenceService
 from ..models.editorial_profile import EditorialProfile
 from ..storage.profile_store import ProfileStore
 
@@ -130,6 +131,11 @@ class ContentPackagerService:
                     "hashtags": ["#shorts"],
                     "error": str(e),
                 }
+
+        # Enrich titles with advisory lint heuristics from YouTube Creator Skills Engine
+        for title_entry in package.get("titles", []):
+            if isinstance(title_entry, dict) and "text" in title_entry:
+                title_entry["lint_advisory"] = YouTubeIntelligenceService.lint_title(title_entry["text"])
 
         if output_dir:
             out_p = Path(output_dir) / "packaging_metadata.json"

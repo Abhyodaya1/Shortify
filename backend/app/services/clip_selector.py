@@ -12,6 +12,7 @@ from uuid import uuid4
 from .viral_clipper import ViralHookScorer
 from .llm_provider import get_llm_provider
 from .editorial_orchestrator import EditorialOrchestrator
+from .youtube_intelligence_service import YouTubeIntelligenceService
 from ..models.editorial_profile import EditorialProfile
 from ..storage.profile_store import ProfileStore
 
@@ -158,6 +159,8 @@ class SmartClipSelector:
                 "hard_rejection_reasons": hard_rejections,
                 "human_review_required": human_review_required,
                 "title": f"#{idx + 1} {clean_headline}",
+                "title_lint_advisory": YouTubeIntelligenceService.lint_title(clean_headline),
+                "dead_air_advisory": YouTubeIntelligenceService.analyze_dead_air(cand["cues"], floor=1.2),
                 "description": content_pkg["description"],
                 "hashtags": content_pkg["hashtags"],
                 "pinned_comment": content_pkg["pinned_comment"],
