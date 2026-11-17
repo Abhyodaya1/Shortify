@@ -32,12 +32,30 @@ import {
 interface Props {
   config: VisualStyleConfig;
   onChangeConfig: (config: VisualStyleConfig) => void;
+  availableHook?: string;
+  availableTitle?: string;
 }
 
-export const VisualStyleStudio: React.FC<Props> = ({ config, onChangeConfig }) => {
+export const VisualStyleStudio: React.FC<Props> = ({
+  config,
+  onChangeConfig,
+  availableHook,
+  availableTitle,
+}) => {
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [activeCaptionCategory, setActiveCaptionCategory] = useState<string>("all");
+
+  const cardMode = config.cardTextMode || "hook";
+  const defaultHook = availableHook || "What happens when AI changes everything?";
+  const defaultTitle = availableTitle || "The AI Shift Nobody Is Talking About";
+
+  const effectiveCardText =
+    cardMode === "custom" && config.customCardText !== undefined
+      ? config.customCardText
+      : cardMode === "title"
+      ? (availableTitle || config.customCardText || defaultTitle)
+      : (availableHook || config.customCardText || defaultHook);
 
   const selectedCaption =
     CAPTION_PRESETS.find((c) => c.id === config.captionPresetId) || CAPTION_PRESETS[0];
@@ -76,7 +94,7 @@ export const VisualStyleStudio: React.FC<Props> = ({ config, onChangeConfig }) =
       socialCardPresetId: preset.id,
       customCardAuthor: preset.authorName,
       customCardHandle: preset.authorHandle,
-      customCardText: preset.id === "none" ? "" : preset.cardText,
+      customCardText: preset.id === "none" ? "" : (config.customCardText || effectiveCardText),
     });
   };
 
@@ -478,6 +496,102 @@ export const VisualStyleStudio: React.FC<Props> = ({ config, onChangeConfig }) =
             </span>
           </div>
 
+          {/* Card Hook / Title Source Switcher & Live Input */}
+          <div className="bg-[#13161D] border border-[#222834] p-3 rounded-lg space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-3.5 h-3.5 text-[#3B82F6]" />
+                <span className="font-sans font-bold text-xs text-neutral-200">
+                  Card Hook / Title:
+                </span>
+                <span className="font-sans text-[10px] text-neutral-400">
+                  (Same title/hook used in post scheduling)
+                </span>
+              </div>
+
+              {/* Source Switcher Buttons */}
+              <div className="flex items-center gap-1 bg-[#0D0F14] p-0.5 rounded-md border border-[#1E232E]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const txt = availableHook || "What happens when AI changes everything?";
+                    onChangeConfig({
+                      ...config,
+                      cardTextMode: "hook",
+                      customCardText: txt,
+                    });
+                  }}
+                  className={`px-2.5 py-1 rounded font-sans text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    (config.cardTextMode || "hook") === "hook"
+                      ? "bg-[#3B82F6] text-white shadow-xs"
+                      : "text-neutral-400 hover:text-white"
+                  }`}
+                  title="Use viral hook for social cards"
+                >
+                  <span>🪝 AI Hook</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const txt = availableTitle || "The AI Shift Nobody Is Talking About";
+                    onChangeConfig({
+                      ...config,
+                      cardTextMode: "title",
+                      customCardText: txt,
+                    });
+                  }}
+                  className={`px-2.5 py-1 rounded font-sans text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    config.cardTextMode === "title"
+                      ? "bg-[#3B82F6] text-white shadow-xs"
+                      : "text-neutral-400 hover:text-white"
+                  }`}
+                  title="Use post scheduling title for social cards"
+                >
+                  <span>📌 Post Title</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChangeConfig({
+                      ...config,
+                      cardTextMode: "custom",
+                    });
+                  }}
+                  className={`px-2.5 py-1 rounded font-sans text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    config.cardTextMode === "custom"
+                      ? "bg-[#3B82F6] text-white shadow-xs"
+                      : "text-neutral-400 hover:text-white"
+                  }`}
+                  title="Type custom text for social cards"
+                >
+                  <span>✍️ Custom</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Live Editable Text Input */}
+            <div className="relative">
+              <input
+                type="text"
+                value={effectiveCardText}
+                onChange={(e) => {
+                  onChangeConfig({
+                    ...config,
+                    cardTextMode: "custom",
+                    customCardText: e.target.value,
+                  });
+                }}
+                placeholder="Hook or title appearing on Reddit, Twitter, Instagram & YouTube cards..."
+                className="w-full px-3 py-1.5 rounded-md border border-[#2A313E] bg-[#0A0C10] font-sans text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-[#3B82F6] transition-colors"
+              />
+              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 font-mono text-[10px] text-neutral-500 pointer-events-none">
+                {effectiveCardText.length} chars
+              </span>
+            </div>
+          </div>
+
           {/* Horizontal / Grid Scroll of Social Cards */}
           <div className="flex gap-3 overflow-x-auto pb-2 pt-0.5 scrollbar-thin scrollbar-thumb-neutral-700">
             {SOCIAL_CARD_PRESETS.map((preset) => (
@@ -486,7 +600,7 @@ export const VisualStyleStudio: React.FC<Props> = ({ config, onChangeConfig }) =
                   preset={preset}
                   isSelected={config.socialCardPresetId === preset.id}
                   onSelect={handleSelectSocialCard}
-                  customText={config.customCardText}
+                  customText={effectiveCardText}
                   customAuthor={config.customCardAuthor}
                 />
               </div>

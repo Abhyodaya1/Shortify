@@ -90,7 +90,7 @@ export const SocialCardView: React.FC<Props> = ({
             {displayText}
           </h4>
 
-          {preset.bodyText && (
+          {preset.bodyText && !customText && (
             <p className="font-sans text-xs text-neutral-600 leading-relaxed">
               {preset.bodyText}
             </p>
@@ -140,7 +140,7 @@ export const SocialCardView: React.FC<Props> = ({
             {displayText}
           </p>
 
-          {preset.bodyText && (
+          {preset.bodyText && !customText && (
             <p className="font-sans text-xs text-neutral-300 leading-relaxed">
               {preset.bodyText}
             </p>

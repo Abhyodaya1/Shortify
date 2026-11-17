@@ -73,6 +73,7 @@ export interface VisualStyleConfig {
   customAllCaps?: boolean;    // Force all caps vs sentence case
   customOutlineWidth?: number;// Outline thickness (0 to 8)
   // Fine tuning overrides
+  cardTextMode?: "hook" | "title" | "custom";
   customCardText?: string;
   customCardAuthor?: string;
   customCardHandle?: string;
@@ -342,7 +343,7 @@ export const SOCIAL_CARD_PRESETS: SocialCardPreset[] = [
     authorHandle: "r/peakheistclips",
     badgeText: "2 hours ago",
     cardText: "What happens when AI changes everything?",
-    bodyText: "The biggest shift might not be the technology itself, but how we use it.",
+    bodyText: "",
     upvotesCount: "2.4k",
     commentsCount: "183",
     verified: false,
@@ -356,7 +357,7 @@ export const SOCIAL_CARD_PRESETS: SocialCardPreset[] = [
     authorHandle: "@peakheistclips",
     badgeText: "X-inspired post",
     cardText: "Most people are thinking about this completely wrong.",
-    bodyText: "When algorithms reward retention over pedigree, single creators outpace media studios.",
+    bodyText: "",
     likesCount: "14.2K",
     commentsCount: "892",
     verified: true,
@@ -451,6 +452,7 @@ export const DEFAULT_VISUAL_STYLE_CONFIG: VisualStyleConfig = {
   layoutPresetId: "full_screen",
   socialCardPresetId: "reddit_card",
   backgroundPresetId: "dark",
+  cardTextMode: "hook",
   customActiveColor: "#FFE600",
   customTextColor: "#FFFFFF",
   customFontName: "Impact",

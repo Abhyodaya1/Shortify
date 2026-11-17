@@ -481,6 +481,7 @@ class MasterTimelineCompositor:
                 "what happens when ai changes",
                 "most people are thinking about this",
                 "the #1 secret",
+                "this single psychological trigger",
                 "if you produce 10 shorts daily",
                 "what formula do you use",
                 "every creator gets asked",

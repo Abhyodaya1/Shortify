@@ -579,6 +579,7 @@ export const PersonalShortsStudio: React.FC = () => {
         "what happens when ai changes",
         "most people are thinking about this",
         "the #1 secret",
+        "this single psychological trigger",
         "if you produce 10 shorts daily",
         "what formula do you use",
         "every creator gets asked",
@@ -643,7 +644,11 @@ export const PersonalShortsStudio: React.FC = () => {
         social_author: resolvedCardType === "none" ? undefined : (visualStyleConfig.customCardAuthor || upfrontCardAuthor),
         social_handle: resolvedCardType === "none" ? undefined : (visualStyleConfig.customCardHandle || upfrontCardHandle),
         social_badge: upfrontCardBadge,
-        social_text: hasRealCustomCardText ? visualStyleConfig.customCardText : (c.opening_hook || c.visual_headline || c.title),
+        social_text: hasRealCustomCardText
+          ? visualStyleConfig.customCardText
+          : (visualStyleConfig.cardTextMode === "title"
+              ? (c.visual_headline || c.title || c.opening_hook)
+              : (c.opening_hook || c.visual_headline || c.title)),
       }));
       persistClipsState(discovered);
     } catch (err: any) {
@@ -1174,6 +1179,8 @@ export const PersonalShortsStudio: React.FC = () => {
               <VisualStyleStudio
                 config={visualStyleConfig}
                 onChangeConfig={setVisualStyleConfig}
+                availableHook={clips[0]?.opening_hook || clips[0]?.visual_headline}
+                availableTitle={clips[0]?.title || clips[0]?.visual_headline || currentVideo?.title}
               />
 
               {/* BIG PROMINENT ACTION BUTTON: Neo-Brutalist Acid Lime CTA */}
