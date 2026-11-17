@@ -82,6 +82,12 @@ export interface VisualStyleConfig {
   subtitleVerticalPosition: number; // 12-84 %
   enableVoiceHook: boolean;
   ttsVoice: string;
+  // Phase 3: Animated Hook, Title & Supporting Caption Settings
+  hookAnimationType?: "slam_in" | "typewriter" | "slide_up" | "kinetic_pop" | "fade_zoom";
+  hookWordArtStyle?: string;
+  hookDurationSec?: number;
+  showSupportingCaption?: boolean;
+  supportingCaptionText?: string;
 }
 
 export const CAPTION_PRESETS: CaptionPreset[] = [
@@ -578,5 +584,10 @@ export const DEFAULT_VISUAL_STYLE_CONFIG: VisualStyleConfig = {
   subtitleVerticalPosition: 76,
   enableVoiceHook: false,
   ttsVoice: "en-US-ChristopherNeural",
+  hookAnimationType: "slam_in",
+  hookWordArtStyle: "slam_in",
+  hookDurationSec: 3.0,
+  showSupportingCaption: true,
+  supportingCaptionText: "Watch until the end",
 };
 

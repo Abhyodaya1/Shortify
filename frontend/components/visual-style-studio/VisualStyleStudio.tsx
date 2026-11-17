@@ -18,6 +18,7 @@ import { LayoutPresetCard } from "./LayoutPresetCard";
 import { SocialCardView } from "./SocialCardView";
 import { BackgroundPresetCard } from "./BackgroundPresetCard";
 import { StylePreviewModal } from "./StylePreviewModal";
+import { KineticHookPreview } from "./KineticHookPreview";
 import {
   Sparkles,
   Eye,
@@ -738,6 +739,13 @@ export const VisualStyleStudio: React.FC<Props> = ({
               </div>
             ))}
           </div>
+
+          {/* Phase 3: Kinetic Hook & Title Animation Studio */}
+          <KineticHookPreview
+            config={config}
+            onChangeConfig={onChangeConfig}
+            hookText={effectiveCardText}
+          />
         </div>
 
         {/* ----------------------------------------------------------------- */}

@@ -95,7 +95,7 @@ export const StylePreviewModal: React.FC<Props> = ({
               </div>
 
               {/* Social Card Layer */}
-              {card.platform !== "none" && (
+              {card.platform !== "none" ? (
                 <div
                   style={{
                     top: `${config.cardVerticalPosition}%`,
@@ -182,6 +182,24 @@ export const StylePreviewModal: React.FC<Props> = ({
                       <p className="font-sans text-[10px] font-bold leading-tight">
                         &ldquo;{cardTextToDisplay}&rdquo;
                       </p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Pure Video Floating Kinetic Hook (Phase 3) */
+                <div
+                  style={{
+                    top: `${config.cardVerticalPosition}%`,
+                    transform: "translate(-50%, 0)",
+                  }}
+                  className="absolute left-1/2 z-20 w-[90%] text-center transition-all select-none"
+                >
+                  <span className="font-sans font-black text-xs sm:text-sm text-[#FFE600] uppercase tracking-wide drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">
+                    {cardTextToDisplay}
+                  </span>
+                  {config.showSupportingCaption !== false && config.supportingCaptionText && (
+                    <div className="mt-1 inline-block px-2.5 py-0.5 rounded-full bg-black/75 border border-white/20 text-[9px] text-neutral-200">
+                      {config.supportingCaptionText}
                     </div>
                   )}
                 </div>

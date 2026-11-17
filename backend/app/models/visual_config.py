@@ -8,13 +8,20 @@ from pydantic import BaseModel, Field
 class OpeningHookIntroConfig(BaseModel):
     enabled: bool = Field(default=True, description="Whether opening hook animation is enabled")
     hook_text: Optional[str] = Field(default=None, description="Opening viral hook text")
-    style: str = Field(default="slam_in", description="Animation style: slam_in, neon_glow, typewriter, slide_up, brush_reveal")
+    supporting_text: Optional[str] = Field(default=None, description="Secondary supporting caption / sub-headline")
+    show_supporting_caption: bool = Field(default=True, description="Whether to show supporting sub-caption below hook")
+    animation_type: Literal["slam_in", "typewriter", "slide_up", "kinetic_pop", "fade_zoom"] = Field(
+        default="slam_in", description="Kinetic animation reveal type"
+    )
+    wordart_style: str = Field(default="slam_in", description="WordArt typography preset: slam_in, neon_glow, gradient_fire, etc.")
     duration_sec: float = Field(default=3.0, ge=0.5, le=10.0, description="Duration of intro presentation")
     enter_duration_sec: float = Field(default=0.4, ge=0.05, le=2.0)
-    exit_duration_sec: float = Field(default=0.3, ge=0.05, le=2.0)
-    font_size: int = Field(default=48, ge=20, le=120)
+    exit_duration_sec: float = Field(default=0.35, ge=0.05, le=2.0)
+    font_size: int = Field(default=54, ge=20, le=120)
+    supporting_font_size: int = Field(default=28, ge=14, le=60)
     color: str = Field(default="#FFE600")
     secondary_color: str = Field(default="#FFFFFF")
+    y_position_percent: float = Field(default=24.0, ge=5.0, le=80.0)
     easing: str = Field(default="ease_out_back")
 
 
