@@ -23,6 +23,7 @@ export const StylePreviewModal: React.FC<Props> = ({
   const layout = LAYOUT_PRESETS.find((l) => l.id === config.layoutPresetId) || LAYOUT_PRESETS[0];
   const card = SOCIAL_CARD_PRESETS.find((s) => s.id === config.socialCardPresetId) || SOCIAL_CARD_PRESETS[0];
   const bg = BACKGROUND_PRESETS.find((b) => b.id === config.backgroundPresetId) || BACKGROUND_PRESETS[0];
+  const cardTextToDisplay = config.customCardText || card.cardText || "The psychological trick behind every viral short";
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-200">
@@ -118,7 +119,7 @@ export const StylePreviewModal: React.FC<Props> = ({
                         />
                       </div>
                       <p className="font-sans text-[10px] font-medium leading-tight">
-                        {config.customCardText || card.cardText}
+                        {cardTextToDisplay}
                       </p>
                     </div>
                   )}
@@ -135,7 +136,7 @@ export const StylePreviewModal: React.FC<Props> = ({
                         <span className="font-sans font-bold text-[9px]">{card.authorHandle}</span>
                       </div>
                       <p className="font-sans text-[10px] font-bold leading-tight">
-                        {config.customCardText || card.cardText}
+                        {cardTextToDisplay}
                       </p>
                     </div>
                   )}
@@ -157,7 +158,7 @@ export const StylePreviewModal: React.FC<Props> = ({
                         </span>
                       </div>
                       <p className="font-sans text-[10px] font-medium leading-tight text-neutral-100">
-                        {config.customCardText || card.cardText}
+                        {cardTextToDisplay}
                       </p>
                     </div>
                   )}
@@ -179,7 +180,7 @@ export const StylePreviewModal: React.FC<Props> = ({
                         </span>
                       </div>
                       <p className="font-sans text-[10px] font-bold leading-tight">
-                        &ldquo;{config.customCardText || card.cardText}&rdquo;
+                        &ldquo;{cardTextToDisplay}&rdquo;
                       </p>
                     </div>
                   )}

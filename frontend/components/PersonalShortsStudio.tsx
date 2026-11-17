@@ -1181,6 +1181,8 @@ export const PersonalShortsStudio: React.FC = () => {
                 onChangeConfig={setVisualStyleConfig}
                 availableHook={clips[0]?.opening_hook || clips[0]?.visual_headline}
                 availableTitle={clips[0]?.title || clips[0]?.visual_headline || currentVideo?.title}
+                titleAlternatives={clips[0]?.title_alternatives}
+                keyHooks={clips[0]?.key_hooks}
               />
 
               {/* BIG PROMINENT ACTION BUTTON: Neo-Brutalist Acid Lime CTA */}

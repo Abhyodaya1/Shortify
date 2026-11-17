@@ -19,7 +19,10 @@ export const SocialCardView: React.FC<Props> = ({
   customText,
   customAuthor,
 }) => {
-  const displayText = customText || preset.cardText;
+  const displayText =
+    customText ||
+    preset.cardText ||
+    "The psychological trick behind every viral short";
   const displayAuthor = customAuthor || preset.authorName;
 
   if (preset.platform === "none") {
@@ -90,12 +93,6 @@ export const SocialCardView: React.FC<Props> = ({
             {displayText}
           </h4>
 
-          {preset.bodyText && !customText && (
-            <p className="font-sans text-xs text-neutral-600 leading-relaxed">
-              {preset.bodyText}
-            </p>
-          )}
-
           <div className="flex items-center gap-2 pt-1 font-sans text-xs font-semibold text-neutral-500">
             <span>↑ {preset.upvotesCount || "2.4k"}</span>
             <span>•</span>
@@ -139,12 +136,6 @@ export const SocialCardView: React.FC<Props> = ({
           <p className="font-sans font-bold text-sm text-white leading-snug">
             {displayText}
           </p>
-
-          {preset.bodyText && !customText && (
-            <p className="font-sans text-xs text-neutral-300 leading-relaxed">
-              {preset.bodyText}
-            </p>
-          )}
 
           {preset.likesCount && (
             <div className="flex items-center gap-4 pt-1 font-sans text-xs text-neutral-400">

@@ -27,35 +27,60 @@ import {
   Volume2,
   RotateCcw,
   Palette,
+  Check,
 } from "lucide-react";
+
+interface TitleAlternative {
+  text: string;
+  angle?: string;
+  accuracy_note?: string;
+}
 
 interface Props {
   config: VisualStyleConfig;
   onChangeConfig: (config: VisualStyleConfig) => void;
   availableHook?: string;
   availableTitle?: string;
+  titleAlternatives?: TitleAlternative[];
+  keyHooks?: string[];
 }
+
+const DEFAULT_HOOK = "The single psychological trick behind 10M views";
+const DEFAULT_TITLE = "The Unfair Advantage 99% Of People Never Realize";
+const DEFAULT_TITLE_ALTERNATIVES: TitleAlternative[] = [
+  { text: "The Unfair Advantage 99% Of People Never Realize", angle: "Curiosity" },
+  { text: "Why Working Harder Is Keeping You Broke", angle: "Contrarian" },
+  { text: "How To Hook Any Viewer In The First 3 Seconds", angle: "How-To" },
+  { text: "The Single Psychological Shift Behind 10M Views", angle: "Story" },
+  { text: "Stop Making This Critical Retention Mistake", angle: "Direct" },
+];
 
 export const VisualStyleStudio: React.FC<Props> = ({
   config,
   onChangeConfig,
   availableHook,
   availableTitle,
+  titleAlternatives,
+  keyHooks,
 }) => {
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [activeCaptionCategory, setActiveCaptionCategory] = useState<string>("all");
 
   const cardMode = config.cardTextMode || "hook";
-  const defaultHook = availableHook || "What happens when AI changes everything?";
-  const defaultTitle = availableTitle || "The AI Shift Nobody Is Talking About";
+  const effectiveHook = availableHook || DEFAULT_HOOK;
+  const effectiveTitle = availableTitle || DEFAULT_TITLE;
+  const activeTitleAlts =
+    titleAlternatives && titleAlternatives.length > 0
+      ? titleAlternatives
+      : DEFAULT_TITLE_ALTERNATIVES;
 
   const effectiveCardText =
     cardMode === "custom" && config.customCardText !== undefined
       ? config.customCardText
       : cardMode === "title"
-      ? (availableTitle || config.customCardText || defaultTitle)
-      : (availableHook || config.customCardText || defaultHook);
+      ? (config.customCardText || effectiveTitle)
+      : (config.customCardText || effectiveHook);
 
   const selectedCaption =
     CAPTION_PRESETS.find((c) => c.id === config.captionPresetId) || CAPTION_PRESETS[0];
@@ -496,8 +521,8 @@ export const VisualStyleStudio: React.FC<Props> = ({
             </span>
           </div>
 
-          {/* Card Hook / Title Source Switcher & Live Input */}
-          <div className="bg-[#13161D] border border-[#222834] p-3 rounded-lg space-y-2.5">
+          {/* Card Hook / Title Source Switcher & Live Input (Aligned with Post Scheduling) */}
+          <div className="bg-[#13161D] border border-[#222834] p-3 rounded-lg space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-3.5 h-3.5 text-[#3B82F6]" />
@@ -505,7 +530,7 @@ export const VisualStyleStudio: React.FC<Props> = ({
                   Card Hook / Title:
                 </span>
                 <span className="font-sans text-[10px] text-neutral-400">
-                  (Same title/hook used in post scheduling)
+                  (Same title/hook used in YouTube post scheduling)
                 </span>
               </div>
 
@@ -514,11 +539,10 @@ export const VisualStyleStudio: React.FC<Props> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    const txt = availableHook || "What happens when AI changes everything?";
                     onChangeConfig({
                       ...config,
                       cardTextMode: "hook",
-                      customCardText: txt,
+                      customCardText: effectiveHook,
                     });
                   }}
                   className={`px-2.5 py-1 rounded font-sans text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
@@ -534,11 +558,10 @@ export const VisualStyleStudio: React.FC<Props> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    const txt = availableTitle || "The AI Shift Nobody Is Talking About";
                     onChangeConfig({
                       ...config,
                       cardTextMode: "title",
-                      customCardText: txt,
+                      customCardText: effectiveTitle,
                     });
                   }}
                   className={`px-2.5 py-1 rounded font-sans text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
@@ -571,6 +594,35 @@ export const VisualStyleStudio: React.FC<Props> = ({
               </div>
             </div>
 
+            {/* Character & Mobile Safe Linting Bar (Matches ScheduleModal) */}
+            <div className="flex items-center justify-between">
+              <label className="font-mono text-[11px] font-bold text-neutral-300 uppercase flex items-center gap-1.5">
+                <span>
+                  {cardMode === "title"
+                    ? "Short Title (From Post Scheduling)"
+                    : cardMode === "hook"
+                    ? "Opening Viral Hook (AI Detected)"
+                    : "Custom Card Text"}
+                </span>
+              </label>
+              <span
+                className={`font-mono text-[10px] font-bold px-2 py-0.5 rounded-md border ${
+                  effectiveCardText.length <= 40
+                    ? "bg-[#d5eb45] text-black border-[#d5eb45]"
+                    : effectiveCardText.length <= 60
+                    ? "bg-[#3B82F6]/20 text-[#3B82F6] border-[#3B82F6]/40"
+                    : "bg-red-950/60 text-red-300 border-red-700/50"
+                }`}
+              >
+                {effectiveCardText.length} chars{" "}
+                {effectiveCardText.length <= 40
+                  ? "• Mobile Safe (<40)"
+                  : effectiveCardText.length <= 60
+                  ? "• Optimal (<60)"
+                  : "• May Truncate"}
+              </span>
+            </div>
+
             {/* Live Editable Text Input */}
             <div className="relative">
               <input
@@ -583,13 +635,93 @@ export const VisualStyleStudio: React.FC<Props> = ({
                     customCardText: e.target.value,
                   });
                 }}
-                placeholder="Hook or title appearing on Reddit, Twitter, Instagram & YouTube cards..."
-                className="w-full px-3 py-1.5 rounded-md border border-[#2A313E] bg-[#0A0C10] font-sans text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-[#3B82F6] transition-colors"
+                placeholder="e.g. Stop Making This Editing Mistake | #Shorts"
+                className="w-full px-3 py-2 rounded-md border border-[#2A313E] bg-[#0A0C10] font-sans text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-[#3B82F6] transition-colors"
               />
-              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 font-mono text-[10px] text-neutral-500 pointer-events-none">
-                {effectiveCardText.length} chars
-              </span>
             </div>
+
+            {/* Alternative Titles Selector (Role 06 Packager) — Identical to Post Scheduling */}
+            {cardMode === "title" && activeTitleAlts.length > 0 && (
+              <div className="space-y-1.5 pt-1 border-t border-[#1E232E]">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-[10px] uppercase font-bold text-neutral-400 flex items-center gap-1.5">
+                    <Sparkles className="w-3 h-3 text-[#3B82F6]" />
+                    <span>Select Alternative Title (Role 06 Packager):</span>
+                  </span>
+                  <span className="font-mono text-[9px] text-[#3B82F6]">
+                    Matches Post Scheduling
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 gap-1">
+                  {activeTitleAlts.map((alt, idx) => {
+                    const isSelected = effectiveCardText === alt.text;
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          onChangeConfig({
+                            ...config,
+                            cardTextMode: "title",
+                            customCardText: alt.text,
+                          });
+                        }}
+                        className={`text-left px-2.5 py-1.5 rounded-md border text-[11px] font-mono transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                          isSelected
+                            ? "bg-[#3B82F6]/15 text-white border-[#3B82F6] font-bold shadow-xs"
+                            : "bg-[#0D0F14] text-neutral-300 border-[#1E232E] hover:border-[#3B82F6]/50 hover:bg-[#151922]"
+                        }`}
+                      >
+                        <span className="truncate flex-1">
+                          <span className="uppercase text-[9px] px-1.5 py-0.5 mr-1.5 rounded-xs border border-[#3B82F6]/40 bg-[#3B82F6]/10 text-[#3B82F6] font-bold">
+                            {alt.angle || `Alt ${idx + 1}`}
+                          </span>
+                          {alt.text}
+                        </span>
+                        {isSelected && (
+                          <Check className="w-3.5 h-3.5 text-[#3B82F6] shrink-0" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Alternative Hooks Selector (If keyHooks provided) */}
+            {cardMode === "hook" && keyHooks && keyHooks.length > 0 && (
+              <div className="space-y-1.5 pt-1 border-t border-[#1E232E]">
+                <span className="font-mono text-[10px] uppercase font-bold text-neutral-400 flex items-center gap-1.5">
+                  <Sparkles className="w-3 h-3 text-[#00E297]" />
+                  <span>Select Detected Hook Variant:</span>
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {keyHooks.map((h, idx) => {
+                    const isSelected = effectiveCardText === h;
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          onChangeConfig({
+                            ...config,
+                            cardTextMode: "hook",
+                            customCardText: h,
+                          });
+                        }}
+                        className={`px-2.5 py-1 rounded-md border text-[11px] font-mono transition-all cursor-pointer ${
+                          isSelected
+                            ? "bg-[#00E297]/15 text-[#00E297] border-[#00E297] font-bold"
+                            : "bg-[#0D0F14] text-neutral-400 border-[#1E232E] hover:text-white"
+                        }`}
+                      >
+                        {h}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Horizontal / Grid Scroll of Social Cards */}

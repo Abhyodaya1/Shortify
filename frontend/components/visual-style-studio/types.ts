@@ -253,6 +253,120 @@ export const CAPTION_PRESETS: CaptionPreset[] = [
   },
 ];
 
+export interface WordArtStyleDefinition {
+  id: string;
+  name: string;
+  description: string;
+  fontFamily: string;
+  primaryColor: string;
+  secondaryColor: string;
+  strokeColor: string;
+  strokeWidth: number;
+}
+
+export const WORDART_PRESETS: WordArtStyleDefinition[] = [
+  {
+    id: "slam_in",
+    name: "Slam In Punch",
+    description: "Hard impact · Heavy shadow · Bold outline",
+    fontFamily: "Impact",
+    primaryColor: "#FFFFFF",
+    secondaryColor: "#FFE600",
+    strokeColor: "#000000",
+    strokeWidth: 6,
+  },
+  {
+    id: "neon_glow",
+    name: "Neon Glow Aura",
+    description: "Dual-layer cyan/magenta · High luminance halo",
+    fontFamily: "Arial Black",
+    primaryColor: "#FFFFFF",
+    secondaryColor: "#00FFFF",
+    strokeColor: "#000000",
+    strokeWidth: 5,
+  },
+  {
+    id: "gradient_fire",
+    name: "Blazing Fire Gradient",
+    description: "Crimson-to-yellow gradient · High heat",
+    fontFamily: "Impact",
+    primaryColor: "#FF3C00",
+    secondaryColor: "#FFE600",
+    strokeColor: "#000000",
+    strokeWidth: 6,
+  },
+  {
+    id: "comic_pop",
+    name: "Comic Pop Art",
+    description: "Retro comic block shadow · Punchy pop",
+    fontFamily: "Impact",
+    primaryColor: "#FFE600",
+    secondaryColor: "#FF2A85",
+    strokeColor: "#000000",
+    strokeWidth: 6,
+  },
+  {
+    id: "cyber_terminal",
+    name: "Cyber Terminal",
+    description: "Phosphor matrix green · Cyberpunk aesthetic",
+    fontFamily: "JetBrains Mono",
+    primaryColor: "#DCFFE6",
+    secondaryColor: "#00FF80",
+    strokeColor: "#002814",
+    strokeWidth: 4,
+  },
+  {
+    id: "metallic_chrome",
+    name: "Metallic Chrome",
+    description: "Specular silver bevel · Studio reflection",
+    fontFamily: "Arial Black",
+    primaryColor: "#F0F5FF",
+    secondaryColor: "#6E829B",
+    strokeColor: "#0A101D",
+    strokeWidth: 5,
+  },
+  {
+    id: "soft_pill",
+    name: "Soft Pill Badge",
+    description: "TikTok/Reels keyword capsule container",
+    fontFamily: "Poppins",
+    primaryColor: "#FFFFFF",
+    secondaryColor: "#D5EB45",
+    strokeColor: "#12161C",
+    strokeWidth: 2,
+  },
+  {
+    id: "duotone_split",
+    name: "Duotone Split",
+    description: "Two-tone electric contrast split",
+    fontFamily: "Arial Black",
+    primaryColor: "#FFFFFF",
+    secondaryColor: "#3B82F6",
+    strokeColor: "#000000",
+    strokeWidth: 5,
+  },
+  {
+    id: "3d_extrude",
+    name: "3D Isometric Extrude",
+    description: "Multi-layered stepped shadow depth",
+    fontFamily: "Impact",
+    primaryColor: "#FFFFFF",
+    secondaryColor: "#FFE600",
+    strokeColor: "#000000",
+    strokeWidth: 5,
+  },
+  {
+    id: "golden_luxury",
+    name: "Golden Luxury",
+    description: "Warm gold metallic sheen · Premium halo",
+    fontFamily: "Trebuchet MS",
+    primaryColor: "#FFE178",
+    secondaryColor: "#B47814",
+    strokeColor: "#2A1800",
+    strokeWidth: 4,
+  },
+];
+
 export const LAYOUT_PRESETS: VideoLayoutPreset[] = [
   {
     id: "full_screen",
@@ -342,7 +456,7 @@ export const SOCIAL_CARD_PRESETS: SocialCardPreset[] = [
     authorName: "u/peakheistclips",
     authorHandle: "r/peakheistclips",
     badgeText: "2 hours ago",
-    cardText: "What happens when AI changes everything?",
+    cardText: "",
     bodyText: "",
     upvotesCount: "2.4k",
     commentsCount: "183",
@@ -356,7 +470,7 @@ export const SOCIAL_CARD_PRESETS: SocialCardPreset[] = [
     authorName: "Peak Heist Clips",
     authorHandle: "@peakheistclips",
     badgeText: "X-inspired post",
-    cardText: "Most people are thinking about this completely wrong.",
+    cardText: "",
     bodyText: "",
     likesCount: "14.2K",
     commentsCount: "892",
@@ -370,7 +484,7 @@ export const SOCIAL_CARD_PRESETS: SocialCardPreset[] = [
     authorName: "peakheistclips",
     authorHandle: "@peakheistclips",
     badgeText: "Follow",
-    cardText: "This single psychological trigger is why some reels get 10M views:",
+    cardText: "",
     metaText: "♫ Original Audio • Trending Sound",
     likesCount: "184K",
     commentsCount: "2,410",
@@ -384,7 +498,7 @@ export const SOCIAL_CARD_PRESETS: SocialCardPreset[] = [
     authorName: "Peak Heist Clips",
     authorHandle: "@peakheistclips",
     badgeText: "CA$ 14.99 SUPERCHAT",
-    cardText: "If you produce 10 shorts daily with AI, what happens to channel velocity?",
+    cardText: "",
     likesCount: "4.2K",
     commentsCount: "381",
     verified: true,
@@ -396,7 +510,7 @@ export const SOCIAL_CARD_PRESETS: SocialCardPreset[] = [
     platform: "quote",
     authorName: "Naval Ravikant",
     authorHandle: "@naval",
-    cardText: "“Code and media are permissionless leverage. They're the leverage behind the newly rich.”",
+    cardText: "",
     verified: false,
     theme: "dark",
   },
