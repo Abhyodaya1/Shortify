@@ -23,7 +23,11 @@ class FaceTrackingReframer:
         # 1. Primary: YuNet ONNX Deep Neural Network
         if self.model_path.exists():
             try:
-                self.detector = cv2.FaceDetectorYN_create(str(self.model_path), "", (320, 320))
+                resolved_str = str(self.model_path.resolve())
+                if hasattr(cv2, "FaceDetectorYN") and hasattr(cv2.FaceDetectorYN, "create"):
+                    self.detector = cv2.FaceDetectorYN.create(resolved_str, "", (320, 320))
+                elif hasattr(cv2, "FaceDetectorYN_create"):
+                    self.detector = cv2.FaceDetectorYN_create(resolved_str, "", (320, 320))
             except Exception as e:
                 print(f"Warning: Could not initialize YuNet ({e})")
 
@@ -35,21 +39,32 @@ class FaceTrackingReframer:
         except Exception:
             pass
 
-    def _detect_face_x(self, frame: np.ndarray, src_w: int, src_h: int) -> Optional[float]:
-        """Detects the primary speaker's center X coordinate using the 2-tier vision chain."""
+    def _detect_faces(self, frame: np.ndarray, src_w: int, src_h: int) -> List[Tuple[float, float, float, float]]:
+        """Detects all visible faces in the frame using the 2-tier vision chain.
+        Returns a list of (x, y, w, h) bounding boxes scaled to (src_w, src_h).
+        """
         detect_w, detect_h = 480, 270
+        detected_faces: List[Tuple[float, float, float, float]] = []
 
-        # Tier 1: YuNet
+        # Tier 1: YuNet ONNX Deep Neural Network
         if self.detector is not None:
             try:
                 self.detector.setInputSize((detect_w, detect_h))
                 small = cv2.resize(frame, (detect_w, detect_h))
                 retval, faces = self.detector.detect(small)
                 if faces is not None and len(faces) > 0:
-                    best_face = max(faces, key=lambda f: f[2] * f[3])
                     scale_x = src_w / detect_w
-                    fx, fw = best_face[0] * scale_x, best_face[2] * scale_x
-                    return float(fx + (fw / 2.0))
+                    scale_y = src_h / detect_h
+                    for f in faces:
+                        fx = float(f[0] * scale_x)
+                        fy = float(f[1] * scale_y)
+                        fw = float(f[2] * scale_x)
+                        fh = float(f[3] * scale_y)
+                        # Filter out tiny noise artifacts
+                        if fw > (src_w * 0.04) and fh > (src_h * 0.04):
+                            detected_faces.append((fx, fy, fw, fh))
+                    if detected_faces:
+                        return detected_faces
             except Exception:
                 pass
 
@@ -60,13 +75,71 @@ class FaceTrackingReframer:
                 small_gray = cv2.resize(gray, (detect_w, detect_h))
                 faces = self.haar_cascade.detectMultiScale(small_gray, scaleFactor=1.2, minNeighbors=4)
                 if len(faces) > 0:
-                    best_face = max(faces, key=lambda f: f[2] * f[3])
                     scale_x = src_w / detect_w
-                    fx, fw = best_face[0] * scale_x, best_face[2] * scale_x
-                    return float(fx + (fw / 2.0))
+                    scale_y = src_h / detect_h
+                    for f in faces:
+                        fx = float(f[0] * scale_x)
+                        fy = float(f[1] * scale_y)
+                        fw = float(f[2] * scale_x)
+                        fh = float(f[3] * scale_y)
+                        if fw > (src_w * 0.04) and fh > (src_h * 0.04):
+                            detected_faces.append((fx, fy, fw, fh))
             except Exception:
                 pass
 
+        return detected_faces
+
+    def _calculate_framing_target(
+        self,
+        faces: List[Tuple[float, float, float, float]],
+        crop_w: int,
+        src_w: int,
+        prev_center_x: float,
+    ) -> Optional[float]:
+        """Calculates optimal horizontal framing target taking 1-person, 2-person conversation,
+        or multi-person dynamics into account.
+        """
+        if not faces:
+            return None
+
+        # Case 1: Exactly 1 face - center directly on speaker's face
+        if len(faces) == 1:
+            f = faces[0]
+            return float(f[0] + (f[2] / 2.0))
+
+        # Case 2: 2 or more faces (Conversational Framing)
+        # Calculate bounding span of all detected faces
+        min_x = min(f[0] for f in faces)
+        max_x = max(f[0] + f[2] for f in faces)
+        span_w = max_x - min_x
+
+        # If both faces fit comfortably inside 9:16 crop window (with 10% safety margin),
+        # frame their midpoint so BOTH speaker and listener remain visible simultaneously!
+        if span_w <= (crop_w * 0.88):
+            midpoint = (min_x + max_x) / 2.0
+            return float(midpoint)
+
+        # Case 3: Faces are wider than 9:16 crop (split dialogue / wide shot).
+        # We track the dominant speaker, using hysteresis to avoid jitter back-and-forth.
+        # Find face closest to previous focus or largest face
+        sorted_by_size = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
+        primary = sorted_by_size[0]
+
+        # Check if another face is closer to current camera position to prevent abrupt jumps
+        for candidate in sorted_by_size[:2]:
+            cand_cx = candidate[0] + (candidate[2] / 2.0)
+            if abs(cand_cx - prev_center_x) < (crop_w * 0.35):
+                primary = candidate
+                break
+
+        return float(primary[0] + (primary[2] / 2.0))
+
+    def _detect_face_x(self, frame: np.ndarray, src_w: int, src_h: int) -> Optional[float]:
+        """Backward-compatible helper returning single primary face center."""
+        faces = self._detect_faces(frame, src_w, src_h)
+        if faces:
+            best_face = max(faces, key=lambda f: f[2] * f[3])
+            return float(best_face[0] + (best_face[2] / 2.0))
         return None
 
     def track_clip_faces(
@@ -103,6 +176,11 @@ class FaceTrackingReframer:
         timestamps = []
         face_count = 0
         total_samples = 0
+        multi_speaker_frames = 0
+
+        current_focus_x = float(center_x + (crop_w / 2.0))
+        last_reliable_target_x = current_focus_x
+        last_face_time = -999.0
 
         for i in range(target_samples):
             t_sec = start_sec + (i * step_sec)
@@ -115,17 +193,38 @@ class FaceTrackingReframer:
             rel_t = round(t_sec - start_sec, 2)
             timestamps.append(rel_t)
 
-            detected_x = self._detect_face_x(frame, src_w, src_h)
-            if detected_x is not None:
+            detected_faces = self._detect_faces(frame, src_w, src_h)
+            if detected_faces:
                 face_count += 1
-            raw_centers.append(detected_x)
+                last_face_time = rel_t
+                if len(detected_faces) >= 2:
+                    multi_speaker_frames += 1
+
+                target_cx = self._calculate_framing_target(
+                    faces=detected_faces,
+                    crop_w=crop_w,
+                    src_w=src_w,
+                    prev_center_x=current_focus_x,
+                )
+                if target_cx is not None:
+                    last_reliable_target_x = target_cx
+                    current_focus_x = target_cx
+                raw_centers.append(target_cx)
+            else:
+                # Occlusion / temporary disappearance holding window (2.5 seconds)
+                if (rel_t - last_face_time) <= 2.5:
+                    # Hold last reliable position securely
+                    raw_centers.append(last_reliable_target_x)
+                else:
+                    # After holding window expires without any face, gracefully drift toward center
+                    raw_centers.append(float(center_x + (crop_w / 2.0)))
 
         cap.release()
 
         # Compute smoothed crop trajectory using Exponential Moving Average (EMA)
         smooth_crops: List[Dict[str, Any]] = []
         prev_crop_x = float(center_x)
-        alpha = 0.22  # EMA smoothing factor for cinematic panning
+        alpha = 0.24  # EMA smoothing factor for cinematic panning
 
         for rel_t, raw_x in zip(timestamps, raw_centers):
             if raw_x is not None:
@@ -146,11 +245,15 @@ class FaceTrackingReframer:
         crop_xs = [c["crop_x"] for c in smooth_crops]
         avg_crop_x = int(np.mean(crop_xs)) if crop_xs else center_x
         detection_ratio = round(face_count / max(1, total_samples), 2)
-        has_face = detection_ratio >= 0.25
+        has_face = detection_ratio >= 0.20
 
         # Check motion amplitude across keyframes
         x_spread = (max(crop_xs) - min(crop_xs)) if crop_xs else 0
         crop_expr = self.build_crop_expression(smooth_crops, max_x, default_x=avg_crop_x)
+
+        framing_mode = "center_fallback"
+        if has_face:
+            framing_mode = "conversation_midpoint" if multi_speaker_frames >= 2 else "single_speaker"
 
         return {
             "source_width": src_w,
@@ -163,6 +266,9 @@ class FaceTrackingReframer:
             "has_motion": x_spread >= 25,
             "face_detection_ratio": detection_ratio,
             "face_locked": has_face,
+            "multi_speaker_detected": multi_speaker_frames >= 2,
+            "framing_mode": framing_mode,
+            "audio_diarization_available": False,
             "keyframes": smooth_crops,
         }
 

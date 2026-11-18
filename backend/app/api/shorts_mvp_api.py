@@ -50,6 +50,9 @@ class DiscoverClipsRequest(BaseModel):
     card_vertical_position: Optional[int] = Field(default=20, description="Card vertical position percent (10-85)")
     card_width_percent: Optional[int] = Field(default=90, description="Card width scale percent (70-100)")
     subtitle_vertical_position: Optional[int] = Field(default=75, description="Subtitle vertical position percent (10-90)")
+    enable_title_frame: bool = Field(default=False, description="Enable opening title frame")
+    title_frame_mode: str = Field(default="blurred_footage", description="blank_bg or blurred_footage")
+    title_frame_duration: float = Field(default=2.5, description="Title frame duration in seconds")
     subtitle_preset: Optional[str] = Field(default="bold_impact", description="Subtitle preset ID")
     custom_active_color: Optional[str] = Field(default=None, description="Active word color hex e.g. #FFE600")
     custom_primary_color: Optional[str] = Field(default=None, description="Non-highlighted text color hex e.g. #FFFFFF")
@@ -86,6 +89,9 @@ class RenderClipRequest(BaseModel):
     card_vertical_position: Optional[int] = Field(default=20, description="Card vertical position percent (10-85)")
     card_width_percent: Optional[int] = Field(default=90, description="Card width scale percent (70-100)")
     subtitle_vertical_position: Optional[int] = Field(default=75, description="Subtitle vertical position percent (10-90)")
+    enable_title_frame: bool = Field(default=False, description="Enable opening title frame")
+    title_frame_mode: str = Field(default="blurred_footage", description="blank_bg or blurred_footage")
+    title_frame_duration: float = Field(default=2.5, description="Title frame duration in seconds")
 
 
 class BatchRenderRequest(BaseModel):
@@ -394,6 +400,9 @@ async def render_clip(payload: RenderClipRequest):
         card_vertical_position=payload.card_vertical_position,
         card_width_percent=payload.card_width_percent,
         subtitle_vertical_position=payload.subtitle_vertical_position,
+        enable_title_frame=payload.enable_title_frame,
+        title_frame_mode=payload.title_frame_mode,
+        title_frame_duration=payload.title_frame_duration,
     )
 
     rendered_file = report["output_files"]["final_video"]

@@ -29,6 +29,7 @@ import {
   RotateCcw,
   Palette,
   Check,
+  Video,
 } from "lucide-react";
 
 interface TitleAlternative {
@@ -69,19 +70,21 @@ export const VisualStyleStudio: React.FC<Props> = ({
   const [activeCaptionCategory, setActiveCaptionCategory] = useState<string>("all");
 
   const cardMode = config.cardTextMode || "hook";
-  const effectiveHook = availableHook || DEFAULT_HOOK;
-  const effectiveTitle = availableTitle || DEFAULT_TITLE;
+  const cleanTitle = (availableTitle || DEFAULT_TITLE).replace(/\s*\|\s*#Shorts\s*$/i, "").trim();
+  const effectiveHook = (availableHook || DEFAULT_HOOK).trim();
+  const effectiveTitle = cleanTitle;
   const activeTitleAlts =
     titleAlternatives && titleAlternatives.length > 0
       ? titleAlternatives
       : DEFAULT_TITLE_ALTERNATIVES;
 
+  // Dynamic card text: strictly aligns with Post Scheduling (Hook vs Title vs Custom)
   const effectiveCardText =
-    cardMode === "custom" && config.customCardText !== undefined
+    cardMode === "custom" && config.customCardText !== undefined && config.customCardText !== ""
       ? config.customCardText
       : cardMode === "title"
-      ? (config.customCardText || effectiveTitle)
-      : (config.customCardText || effectiveHook);
+      ? (config.customCardText && config.cardTextMode === "title" ? config.customCardText : effectiveTitle)
+      : (config.customCardText && config.cardTextMode === "hook" ? config.customCardText : effectiveHook);
 
   const selectedCaption =
     CAPTION_PRESETS.find((c) => c.id === config.captionPresetId) || CAPTION_PRESETS[0];
@@ -120,7 +123,6 @@ export const VisualStyleStudio: React.FC<Props> = ({
       socialCardPresetId: preset.id,
       customCardAuthor: preset.authorName,
       customCardHandle: preset.authorHandle,
-      customCardText: preset.id === "none" ? "" : (config.customCardText || effectiveCardText),
     });
   };
 
@@ -746,6 +748,105 @@ export const VisualStyleStudio: React.FC<Props> = ({
             onChangeConfig={onChangeConfig}
             hookText={effectiveCardText}
           />
+
+          {/* Task 4: Opening Title Frame Controls */}
+          <div className="bg-[#10131A] border border-[#222834] p-3.5 rounded-xl space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Video className="w-4 h-4 text-[#D5EB45]" />
+                <span className="font-sans font-bold text-xs text-white">
+                  Opening Title Frame (Intro Hook Reveal)
+                </span>
+                <span className="font-mono text-[9px] px-1.5 py-0.5 rounded-xs bg-[#D5EB45]/15 text-[#D5EB45] border border-[#D5EB45]/40 font-bold">
+                  {config.enableTitleFrame ? "ENABLED" : "DIRECT CUT"}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  onChangeConfig({
+                    ...config,
+                    enableTitleFrame: !config.enableTitleFrame,
+                  })
+                }
+                className={`px-3 py-1 rounded-md font-mono text-[11px] font-bold uppercase transition-all cursor-pointer ${
+                  config.enableTitleFrame
+                    ? "bg-[#D5EB45] text-black shadow-xs"
+                    : "bg-[#1E232E] text-neutral-400 hover:text-white"
+                }`}
+              >
+                {config.enableTitleFrame ? "✓ Enabled" : "Disabled (Direct Cut)"}
+              </button>
+            </div>
+
+            {config.enableTitleFrame && (
+              <div className="space-y-3 pt-2 border-t border-[#1E232E] animate-in fade-in duration-150">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onChangeConfig({
+                        ...config,
+                        titleFrameMode: "blank_bg",
+                      })
+                    }
+                    className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all ${
+                      config.titleFrameMode === "blank_bg"
+                        ? "bg-[#3B82F6]/15 border-[#3B82F6] text-white font-bold"
+                        : "bg-[#0D0F14] border-[#1E232E] text-neutral-400 hover:text-white"
+                    }`}
+                  >
+                    <div className="text-xs font-bold flex items-center gap-1.5">
+                      <span>⬛ Mode A: Clean Blank Canvas</span>
+                    </div>
+                    <p className="text-[10px] text-neutral-400 mt-1">
+                      Bold animated title &amp; supporting caption over clean dark canvas, then dissolves into video.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onChangeConfig({
+                        ...config,
+                        titleFrameMode: "blurred_footage",
+                      })
+                    }
+                    className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all ${
+                      config.titleFrameMode === "blurred_footage"
+                        ? "bg-[#D5EB45]/15 border-[#D5EB45] text-white font-bold"
+                        : "bg-[#0D0F14] border-[#1E232E] text-neutral-400 hover:text-white"
+                    }`}
+                  >
+                    <div className="text-xs font-bold flex items-center gap-1.5">
+                      <span>🌫️ Mode B: Blurred Video Background</span>
+                    </div>
+                    <p className="text-[10px] text-neutral-400 mt-1">
+                      Smoothly blurs opening video footage with soft audio transition, then unblurs into the live clip.
+                    </p>
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between font-mono text-[11px] text-neutral-400 pt-1">
+                  <span>Intro Duration: {config.titleFrameDuration || 2.5}s</span>
+                  <input
+                    type="range"
+                    min="1.5"
+                    max="4.0"
+                    step="0.5"
+                    value={config.titleFrameDuration || 2.5}
+                    onChange={(e) =>
+                      onChangeConfig({
+                        ...config,
+                        titleFrameDuration: parseFloat(e.target.value),
+                      })
+                    }
+                    className="w-40 accent-[#D5EB45] cursor-pointer"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* ----------------------------------------------------------------- */}

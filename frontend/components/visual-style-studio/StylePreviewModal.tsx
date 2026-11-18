@@ -23,7 +23,7 @@ export const StylePreviewModal: React.FC<Props> = ({
   const layout = LAYOUT_PRESETS.find((l) => l.id === config.layoutPresetId) || LAYOUT_PRESETS[0];
   const card = SOCIAL_CARD_PRESETS.find((s) => s.id === config.socialCardPresetId) || SOCIAL_CARD_PRESETS[0];
   const bg = BACKGROUND_PRESETS.find((b) => b.id === config.backgroundPresetId) || BACKGROUND_PRESETS[0];
-  const cardTextToDisplay = config.customCardText || card.cardText || "The psychological trick behind every viral short";
+  const cardTextToDisplay = config.customCardText || card.cardText || "Hook / Title from Video";
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-200">

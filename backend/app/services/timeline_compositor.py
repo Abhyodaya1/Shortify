@@ -262,6 +262,10 @@ class MasterTimelineCompositor:
         card_vertical_position: Optional[int] = 20,
         card_width_percent: Optional[int] = 90,
         subtitle_vertical_position: Optional[int] = 75,
+        # Task 4: Opening title frame options
+        enable_title_frame: bool = False,
+        title_frame_mode: str = "blurred_footage",
+        title_frame_duration: float = 2.5,
         # Target export resolution
         target_width: int = 1080,
         target_height: int = 1920,
@@ -634,6 +638,11 @@ class MasterTimelineCompositor:
                 "ending_hook_enabled": bool(ending_audio_path),
                 "ending_hook_text": ending_hook_text,
             },
+            "title_frame": {
+                "enabled": enable_title_frame,
+                "mode": title_frame_mode,
+                "duration_sec": title_frame_duration if enable_title_frame else 0.0,
+            },
             "subtitles": {
                 "preset": subtitle_preset,
                 "word_count": len(combined_words),
@@ -832,7 +841,7 @@ class MasterTimelineCompositor:
                     rf"[1:v]crop=w=min(iw\,ih*{target_width}/{bot_h}):h=min(ih\,iw*{bot_h}/{target_width}):x=(iw-ow)/2:y=(ih-oh)/2,scale={target_width}:{bot_h}[bot]; "
                     f"[top][bot]vstack=inputs=2[stacked]; "
                     f"[2:v]scale={c_w}:{c_h}[card]; "
-                    f"[stacked][card]overlay=(W-w)/2:{card_y}[v]"
+                    f"[stacked][card]overlay=(W-w)/2:{card_y}:eof_action=pass[v]"
                 )
                 main_cmd = [
                     "ffmpeg", "-y",
@@ -899,8 +908,8 @@ class MasterTimelineCompositor:
                         f"[1:v]scale={target_width}:{target_height}:force_original_aspect_ratio=increase,crop={target_width}:{target_height},boxblur=25:5,eq=brightness=-0.15:contrast=1.05[bg]; "
                         f"[0:v]scale={card_w}:{card_h}[fg]; "
                         f"[2:v]scale={c_w}:{c_h}[card]; "
-                        f"[bg][fg]overlay=(W-w)/2:{vid_y}[base]; "
-                        f"[base][card]overlay=(W-w)/2:{card_y}[v]"
+                        f"[bg][fg]overlay=(W-w)/2:{vid_y}:eof_action=pass[base]; "
+                        f"[base][card]overlay=(W-w)/2:{card_y}:eof_action=pass[v]"
                     )
                     main_cmd = [
                         "ffmpeg", "-y",
@@ -955,8 +964,8 @@ class MasterTimelineCompositor:
                         f"[0:v]scale={target_width}:{target_height}:force_original_aspect_ratio=increase,crop={target_width}:{target_height},boxblur=25:5,eq=brightness=-0.15:contrast=1.05[bg]; "
                         f"[0:v]scale={card_w}:{card_h}[fg]; "
                         f"[1:v]scale={c_w}:{c_h}[card]; "
-                        f"[bg][fg]overlay=(W-w)/2:{vid_y}[base]; "
-                        f"[base][card]overlay=(W-w)/2:{card_y}[v]"
+                        f"[bg][fg]overlay=(W-w)/2:{vid_y}:eof_action=pass[base]; "
+                        f"[base][card]overlay=(W-w)/2:{card_y}:eof_action=pass[v]"
                     )
                     main_cmd = [
                         "ffmpeg", "-y",
@@ -1009,7 +1018,7 @@ class MasterTimelineCompositor:
                 full_card_filter = (
                     f"[0:v]crop=w={crop_w}:h={crop_h}:x={full_crop_x}:y=0,scale={target_width}:{target_height}[vid]; "
                     f"[1:v]scale={c_w}:{c_h}[card]; "
-                    f"[vid][card]overlay=(W-w)/2:{card_y}[v]"
+                    f"[vid][card]overlay=(W-w)/2:{card_y}:eof_action=pass[v]"
                 )
                 main_cmd = [
                     "ffmpeg", "-y",
@@ -1247,7 +1256,7 @@ class MasterTimelineCompositor:
                     rf"[1:v]crop=w=min(iw\,ih*{target_width}/{bot_h}):h=min(ih\,iw*{bot_h}/{target_width}):x=(iw-ow)/2:y=(ih-oh)/2,scale={target_width}:{bot_h}[bot]; "
                     f"[top][bot]vstack=inputs=2[stacked]; "
                     f"[2:v]scale={c_w}:{c_h}[card]; "
-                    f"[stacked][card]overlay=(W-w)/2:{card_y},subtitles='{escaped_ass}'[v]"
+                    f"[stacked][card]overlay=(W-w)/2:{card_y}:eof_action=pass,subtitles='{escaped_ass}'[v]"
                 )
                 cmd = [
                     "ffmpeg", "-y",
@@ -1315,7 +1324,7 @@ class MasterTimelineCompositor:
                         f"[0:v]scale={card_w}:{card_h}[fg]; "
                         f"[2:v]scale={c_w}:{c_h}[card]; "
                         f"[bg][fg]overlay=(W-w)/2:{vid_y}[base]; "
-                        f"[base][card]overlay=(W-w)/2:{card_y},subtitles='{escaped_ass}'[v]"
+                        f"[base][card]overlay=(W-w)/2:{card_y}:eof_action=pass,subtitles='{escaped_ass}'[v]"
                     )
                     cmd = [
                         "ffmpeg", "-y",
@@ -1373,7 +1382,7 @@ class MasterTimelineCompositor:
                         f"[0:v]scale={card_w}:{card_h}[fg]; "
                         f"[1:v]scale={c_w}:{c_h}[card]; "
                         f"[bg][fg]overlay=(W-w)/2:{vid_y}[base]; "
-                        f"[base][card]overlay=(W-w)/2:{card_y},subtitles='{escaped_ass}'[v]"
+                        f"[base][card]overlay=(W-w)/2:{card_y}:eof_action=pass,subtitles='{escaped_ass}'[v]"
                     )
                     cmd = [
                         "ffmpeg", "-y",
@@ -1426,7 +1435,7 @@ class MasterTimelineCompositor:
                 full_card_filter = (
                     f"[0:v]crop=w={crop_w}:h={crop_h}:x={full_crop_x}:y=0,scale={target_width}:{target_height}[vid]; "
                     f"[1:v]scale={c_w}:{c_h}[card]; "
-                    f"[vid][card]overlay=(W-w)/2:{card_y},subtitles='{escaped_ass}'[v]"
+                    f"[vid][card]overlay=(W-w)/2:{card_y}:eof_action=pass,subtitles='{escaped_ass}'[v]"
                 )
                 cmd = [
                     "ffmpeg", "-y",

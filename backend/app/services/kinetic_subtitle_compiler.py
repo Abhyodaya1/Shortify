@@ -543,24 +543,33 @@ class KineticSubtitleCompiler:
                     w_dur_sec = max(0.1, w_end - w_start)
                     w_dur_cs = int(w_dur_sec * 100)
 
-                    # Determine active word animation tags
+                    # Determine distinct active word animation tags based on preset identity
                     if "glow" in anim_type:
-                        # Razor-sharp core glyph, solid dark outline stroke (\3c), with controlled luminous aura (\4c)
-                        # Eliminates excessive blur and washed-out edges
-                        highlight_prefix = f"{{\\c{active_color}\\3c&H00000000&\\4c{active_color}\\bord4.8\\shad2.8\\blur1.2\\fscx112\\fscy112}}"
+                        # Neon Glow: Razor-sharp core glyph, dark stroke, with controlled luminous aura
+                        highlight_prefix = f"{{\\c{active_color}\\3c&H00000000&\\4c{active_color}\\bord5.0\\shad3.0\\blur1.2\\fscx110\\fscy110}}"
                     elif "fade" in anim_type:
-                        # Smooth dissolving fade transition
-                        highlight_prefix = f"{{\\c{active_color}\\fad(60,40)}}"
+                        # Classic / Cinematic: Pure smooth alpha fade with zero scale distortion (stable legibility)
+                        highlight_prefix = f"{{\\c{active_color}\\fad(80,50)}}"
+                    elif "slam" in anim_type or preset_name == "bold_impact":
+                        # Bold Word Highlight / Slam: Hard impact snap from 136% down to 100%
+                        t_snap = min(120, int(w_dur_cs * 8))
+                        highlight_prefix = f"{{\\c{active_color}\\fscx136\\fscy136\\t(0,{t_snap},\\fscx100\\fscy100)}}"
                     elif "slide" in anim_type:
-                        # Kinetic micro-rise animation
-                        highlight_prefix = f"{{\\c{active_color}\\fscy114\\fscx106}}"
+                        # Clean Professional: Kinetic micro-rise letter-spaced tracking
+                        t_slide = min(140, int(w_dur_cs * 8))
+                        highlight_prefix = f"{{\\c{active_color}\\fscy112\\fsp1\\t(0,{t_slide},\\fscy100\\fsp0)}}"
                     elif "karaoke" in anim_type:
-                        # Syllable / word karaoke color sweep
+                        # Karaoke Highlight: Syllable / word sweep
                         highlight_prefix = f"{{\\c{active_color}\\k{w_dur_cs}}}"
-                    else: # word_pop / bounce / default
+                    elif "bounce" in anim_type or "comic" in anim_type:
+                        # Gaming / Comic Pop: Explosive comic angular tilt & bounce
+                        t_bounce = min(140, int(w_dur_cs * 8))
+                        highlight_prefix = f"{{\\c{active_color}\\frz2\\fscx122\\fscy122\\t(0,{t_bounce},\\frz0\\fscx100\\fscy100)}}"
+                    else: # word_pop / default Hormozi elastic scale
+                        t_up = min(90, int(w_dur_cs * 5))
+                        t_settle = min(160, int(w_dur_cs * 9))
                         scale_pct = preset.get("scale_pop", 118)
-                        scale_tag = f"\\fscx{scale_pct}\\fscy{scale_pct}" if scale_pct != 100 else ""
-                        highlight_prefix = f"{{\\c{active_color}{scale_tag}}}"
+                        highlight_prefix = f"{{\\c{active_color}\\fscx85\\fscy85\\t(0,{t_up},\\fscx{scale_pct}\\fscy{scale_pct})\\t({t_up},{t_settle},\\fscx100\\fscy100)}}"
 
                     reset_suffix = "{\\r}"
 

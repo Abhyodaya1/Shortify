@@ -690,10 +690,15 @@ export const PersonalShortsStudio: React.FC = () => {
           social_author: clip.card_type === "none" ? undefined : (clip.social_author || socialAuthor),
           social_handle: clip.card_type === "none" ? undefined : (clip.social_handle || socialHandle),
           social_badge: clip.social_badge || socialBadge,
-          social_text: clip.card_type === "none" ? undefined : (clip.social_text || undefined),
+          social_text: clip.card_type === "none"
+            ? undefined
+            : (clip.social_text || (visualStyleConfig.cardTextMode === "title" ? (clip.title?.replace(/\s*\|\s*#Shorts\s*$/i, "") || clip.visual_headline) : (clip.opening_hook || clip.visual_headline))),
           card_vertical_position: clip.card_vertical_position ?? visualStyleConfig.cardVerticalPosition,
           card_width_percent: clip.card_width_percent ?? visualStyleConfig.cardWidthPercent,
           subtitle_vertical_position: clip.subtitle_vertical_position ?? visualStyleConfig.subtitleVerticalPosition,
+          enable_title_frame: visualStyleConfig.enableTitleFrame ?? false,
+          title_frame_mode: visualStyleConfig.titleFrameMode || "blurred_footage",
+          title_frame_duration: visualStyleConfig.titleFrameDuration || 2.5,
         }),
       });
 
@@ -786,10 +791,15 @@ export const PersonalShortsStudio: React.FC = () => {
           social_author: updatedDraft.card_type === "none" ? undefined : (updatedDraft.social_author || socialAuthor),
           social_handle: updatedDraft.card_type === "none" ? undefined : (updatedDraft.social_handle || socialHandle),
           social_badge: updatedDraft.social_badge || socialBadge,
-          social_text: updatedDraft.card_type === "none" ? undefined : (updatedDraft.social_text || undefined),
+          social_text: updatedDraft.card_type === "none"
+            ? undefined
+            : (updatedDraft.social_text || updatedDraft.headline_text || updatedDraft.opening_hook || undefined),
           card_vertical_position: updatedDraft.card_vertical_position,
           card_width_percent: updatedDraft.card_width_percent,
           subtitle_vertical_position: updatedDraft.subtitle_vertical_position,
+          enable_title_frame: visualStyleConfig.enableTitleFrame ?? false,
+          title_frame_mode: visualStyleConfig.titleFrameMode || "blurred_footage",
+          title_frame_duration: visualStyleConfig.titleFrameDuration || 2.5,
         }),
       });
 
@@ -2648,18 +2658,85 @@ export const PersonalShortsStudio: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="font-mono text-[10px] font-bold text-primary uppercase block mb-1">
-                      Visual Headline / Card Hook:
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-mono text-[10px] font-bold text-primary uppercase">
+                        Visual Headline / Social Card Text:
+                      </label>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const hookVal = (editingClip.opening_hook || editingClip.visual_headline || "").trim();
+                            setEditingClip({
+                              ...editingClip,
+                              headline_text: hookVal,
+                              social_text: hookVal,
+                            });
+                          }}
+                          className="px-1.5 py-0.5 border border-primary font-mono text-[9px] font-bold uppercase bg-surface-container hover:bg-[#d5eb45] transition-colors cursor-pointer"
+                        >
+                          Use Hook
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const titleVal = (editingClip.title || editingClip.visual_headline || "").replace(/\s*\|\s*#Shorts\s*$/i, "").trim();
+                            setEditingClip({
+                              ...editingClip,
+                              headline_text: titleVal,
+                              social_text: titleVal,
+                            });
+                          }}
+                          className="px-1.5 py-0.5 border border-primary font-mono text-[9px] font-bold uppercase bg-surface-container hover:bg-[#d5eb45] transition-colors cursor-pointer"
+                        >
+                          Use Post Title
+                        </button>
+                      </div>
+                    </div>
                     <input
                       type="text"
-                      value={editingClip.headline_text || editingClip.visual_headline || editingClip.title}
+                      value={editingClip.social_text || editingClip.headline_text || editingClip.visual_headline || editingClip.title}
                       onChange={(e) =>
-                        setEditingClip({ ...editingClip, headline_text: e.target.value })
+                        setEditingClip({
+                          ...editingClip,
+                          headline_text: e.target.value,
+                          social_text: e.target.value,
+                        })
                       }
                       className="w-full p-2 border-2 border-primary bg-surface-container-lowest font-mono text-xs text-primary focus:outline-none focus:shadow-[2px_2px_0px_#111111]"
                       placeholder="e.g. STOP TRADING YOUR TIME!"
                     />
+
+                    {/* Title Alternatives Dropdown / Quick Select */}
+                    {editingClip.title_alternatives && editingClip.title_alternatives.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        <span className="font-mono text-[9px] text-outline uppercase block">
+                          Or select alternative title (matches post scheduling):
+                        </span>
+                        <div className="flex flex-wrap gap-1">
+                          {editingClip.title_alternatives.map((alt: any, idx: number) => {
+                            const altText = (typeof alt === "string" ? alt : alt.text || "").replace(/\s*\|\s*#Shorts\s*$/i, "").trim();
+                            return (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() =>
+                                  setEditingClip({
+                                    ...editingClip,
+                                    headline_text: altText,
+                                    social_text: altText,
+                                  })
+                                }
+                                className="px-2 py-0.5 border border-primary font-mono text-[9px] bg-white hover:bg-[#d5eb45] text-primary transition-all cursor-pointer truncate max-w-[280px]"
+                                title={altText}
+                              >
+                                {alt.angle ? `[${alt.angle}] ` : ""}{altText}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div>

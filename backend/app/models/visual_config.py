@@ -66,6 +66,9 @@ class GlobalVisualConfig(BaseModel):
     custom_animation: str = Field(default="word_pop")
     custom_all_caps: bool = Field(default=True)
     custom_outline_width: float = Field(default=5.0, ge=0.0, le=12.0)
+    enable_title_frame: bool = Field(default=False, description="Enable optional opening title frame")
+    title_frame_mode: Literal["blank_bg", "blurred_footage"] = Field(default="blurred_footage", description="Mode A (blank_bg) vs Mode B (blurred_footage)")
+    title_frame_duration: float = Field(default=2.5, ge=1.0, le=5.0, description="Intro title frame duration in seconds")
     intro: Optional[OpeningHookIntroConfig] = None
     hook_animation: Optional[AnimatedTextElementConfig] = None
     title_animation: Optional[AnimatedTextElementConfig] = None

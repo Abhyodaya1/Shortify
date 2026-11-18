@@ -88,6 +88,10 @@ export interface VisualStyleConfig {
   hookDurationSec?: number;
   showSupportingCaption?: boolean;
   supportingCaptionText?: string;
+  // Task 4: Opening Title Frame Settings
+  enableTitleFrame?: boolean; // Enable optional opening title frame
+  titleFrameMode?: "blank_bg" | "blurred_footage"; // Mode A: Clean blank background vs Mode B: Blurred previous footage with transition
+  titleFrameDuration?: number; // Duration of opening title frame in seconds (1.5 - 4.0s)
 }
 
 export const CAPTION_PRESETS: CaptionPreset[] = [
@@ -589,5 +593,8 @@ export const DEFAULT_VISUAL_STYLE_CONFIG: VisualStyleConfig = {
   hookDurationSec: 3.0,
   showSupportingCaption: true,
   supportingCaptionText: "Watch until the end",
+  enableTitleFrame: false,
+  titleFrameMode: "blurred_footage",
+  titleFrameDuration: 2.5,
 };
 

@@ -19,10 +19,11 @@ export const SocialCardView: React.FC<Props> = ({
   customText,
   customAuthor,
 }) => {
-  const displayText =
-    customText ||
-    preset.cardText ||
-    "The psychological trick behind every viral short";
+  const displayText = (customText && customText.trim().length > 0)
+    ? customText
+    : (preset.cardText && preset.cardText.trim().length > 0)
+    ? preset.cardText
+    : "Hook / Title from Video";
   const displayAuthor = customAuthor || preset.authorName;
 
   if (preset.platform === "none") {
