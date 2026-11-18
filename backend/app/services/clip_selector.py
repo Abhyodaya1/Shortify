@@ -72,8 +72,17 @@ class SmartClipSelector:
                 "sentence_complete": True,
             })
 
-        # 2. Filter overlapping candidates (>10s overlap)
+        # 2. Filter overlapping candidates (>10s overlap) and keep top 8 information-rich spans to guarantee fast analysis
         filtered_candidates = cls._filter_overlapping(raw_candidates)
+        if len(filtered_candidates) > 8:
+            # Rank candidates by speech density (words per second) to select the most engaging segments
+            filtered_candidates.sort(
+                key=lambda c: len(c.get("spoken_text", "").split()) / max(1.0, c.get("duration_sec", 1.0)),
+                reverse=True,
+            )
+            filtered_candidates = filtered_candidates[:8]
+            # Restore chronological order
+            filtered_candidates.sort(key=lambda c: c["start_sec"])
 
         # 3. Score all candidates with LLM + 21 Hook Formulas
         processed_clips = []

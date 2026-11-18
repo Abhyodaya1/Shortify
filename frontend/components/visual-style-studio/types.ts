@@ -25,7 +25,7 @@ export interface VideoLayoutPreset {
   id: string;
   name: string;
   description: string;
-  type: "full_screen" | "split_50_50" | "split_60_40" | "pip" | "floating" | "blurred_bg" | "card_frame" | "stacked" | "side_by_side" | "custom";
+  type: "full_screen" | "split_50_50" | "split_60_40" | "pip" | "floating" | "blurred_bg" | "card_frame" | "stacked" | "screencast" | "side_by_side" | "custom";
   splitRatio: number; // e.g. 50, 60, 100
   speakerScalePercent: number;
   backgroundTreatment: "none" | "gameplay" | "blur" | "dark" | "gradient" | "card";
@@ -444,6 +444,15 @@ export const LAYOUT_PRESETS: VideoLayoutPreset[] = [
     splitRatio: 48,
     speakerScalePercent: 48,
     backgroundTreatment: "gameplay",
+  },
+  {
+    id: "screencast",
+    name: "Screencast",
+    description: "Slide/code on top (52%), speaker face framed below (48%)",
+    type: "screencast",
+    splitRatio: 52,
+    speakerScalePercent: 48,
+    backgroundTreatment: "none",
   },
   {
     id: "pip",

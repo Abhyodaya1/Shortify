@@ -182,6 +182,10 @@ class FaceTrackingReframer:
         last_reliable_target_x = current_focus_x
         last_face_time = -999.0
 
+        left_face_samples: List[Tuple[float, float]] = []
+        right_face_samples: List[Tuple[float, float]] = []
+        detected_head_boxes: List[Dict[str, float]] = []
+
         for i in range(target_samples):
             t_sec = start_sec + (i * step_sec)
             cap.set(cv2.CAP_PROP_POS_MSEC, t_sec * 1000.0)
@@ -199,6 +203,28 @@ class FaceTrackingReframer:
                 last_face_time = rel_t
                 if len(detected_faces) >= 2:
                     multi_speaker_frames += 1
+                    top_two = sorted(detected_faces, key=lambda f: f[2] * f[3], reverse=True)[:2]
+                    top_two.sort(key=lambda f: f[0])
+                    f_left, f_right = top_two[0], top_two[1]
+                    left_face_samples.append((f_left[0] + f_left[2] / 2.0, f_left[1] + f_left[3] / 2.0))
+                    right_face_samples.append((f_right[0] + f_right[2] / 2.0, f_right[1] + f_right[3] / 2.0))
+                elif len(detected_faces) == 1:
+                    f = detected_faces[0]
+                    cx = f[0] + f[2] / 2.0
+                    cy = f[1] + f[3] / 2.0
+                    if cx < (src_w / 2.0):
+                        left_face_samples.append((cx, cy))
+                    else:
+                        right_face_samples.append((cx, cy))
+
+                for fx, fy, fw, fh in detected_faces:
+                    detected_head_boxes.append({
+                        "x0": fx / float(src_w),
+                        "y0": fy / float(src_h),
+                        "x1": (fx + fw) / float(src_w),
+                        "y1": (fy + fh) / float(src_h),
+                        "timestamp_sec": rel_t,
+                    })
 
                 target_cx = self._calculate_framing_target(
                     faces=detected_faces,
@@ -255,6 +281,19 @@ class FaceTrackingReframer:
         if has_face:
             framing_mode = "conversation_midpoint" if multi_speaker_frames >= 2 else "single_speaker"
 
+        default_left_cx = src_w * 0.30
+        default_right_cx = src_w * 0.70
+        default_cy = src_h * 0.40
+
+        left_speaker_center = (
+            float(np.mean([s[0] for s in left_face_samples])) if left_face_samples else default_left_cx,
+            float(np.mean([s[1] for s in left_face_samples])) if left_face_samples else default_cy,
+        )
+        right_speaker_center = (
+            float(np.mean([s[0] for s in right_face_samples])) if right_face_samples else default_right_cx,
+            float(np.mean([s[1] for s in right_face_samples])) if right_face_samples else default_cy,
+        )
+
         return {
             "source_width": src_w,
             "source_height": src_h,
@@ -267,6 +306,9 @@ class FaceTrackingReframer:
             "face_detection_ratio": detection_ratio,
             "face_locked": has_face,
             "multi_speaker_detected": multi_speaker_frames >= 2,
+            "left_speaker_center": left_speaker_center,
+            "right_speaker_center": right_speaker_center,
+            "detected_head_boxes": detected_head_boxes,
             "framing_mode": framing_mode,
             "audio_diarization_available": False,
             "keyframes": smooth_crops,

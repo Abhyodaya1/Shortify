@@ -25,6 +25,10 @@ export const StylePreviewModal: React.FC<Props> = ({
   const bg = BACKGROUND_PRESETS.find((b) => b.id === config.backgroundPresetId) || BACKGROUND_PRESETS[0];
   const cardTextToDisplay = config.customCardText || card.cardText || "Hook / Title from Video";
 
+  const isSplitLayout = layout.type === "split_50_50" || layout.id.includes("split") || layout.type === "stacked";
+  const effectiveSubY = isSplitLayout && (config.subtitleVerticalPosition >= 70 || !config.subtitleVerticalPosition) ? 50 : (config.subtitleVerticalPosition || 78);
+  const effectiveCardY = isSplitLayout && (config.cardVerticalPosition || 16) > 30 ? 12 : (config.cardVerticalPosition || 16);
+
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-200">
       <div className="bg-[#111317] border-2 border-[#2A303C] rounded-2xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl">
@@ -61,13 +65,25 @@ export const StylePreviewModal: React.FC<Props> = ({
                 className="absolute inset-0 z-0"
                 style={{ background: bg.cssValue }}
               >
-                {layout.type === "split_50_50" && (
+                {isSplitLayout && (
                   <div className="w-full h-full flex flex-col">
-                    <div className="w-full h-1/2 bg-[#2D333F] border-b border-black flex items-center justify-center">
-                      <span className="font-mono text-[10px] text-white/50 font-bold">SPEAKER 50%</span>
+                    <div className="w-full h-1/2 bg-[#2D333F] border-b-2 border-[#3B82F6]/60 flex flex-col items-center justify-center relative">
+                      <span className="font-mono text-[10px] text-white/70 font-bold tracking-wider">TOP SPEAKER</span>
+                      <span className="font-mono text-[7px] text-[#3B82F6]/90">[42% HEADROOM BIAS]</span>
                     </div>
-                    <div className="w-full h-1/2 bg-[#1A1D24] flex items-center justify-center">
-                      <span className="font-mono text-[10px] text-white/40 font-bold">GAMEPLAY 50%</span>
+                    <div className="w-full h-1/2 bg-[#1A1D24] flex flex-col items-center justify-center">
+                      <span className="font-mono text-[10px] text-white/50 font-bold tracking-wider">BOTTOM SPEAKER</span>
+                    </div>
+                  </div>
+                )}
+                {layout.type === "screencast" && (
+                  <div className="w-full h-full flex flex-col">
+                    <div className="w-full h-[52%] bg-[#1E293B] border-b-2 border-[#10B981] flex flex-col items-center justify-center p-2">
+                      <span className="font-mono text-[9px] text-[#10B981] font-bold">SLIDE / CODE / SCREEN (52%)</span>
+                      <span className="font-mono text-[7px] text-white/50">[FULL WIDTH PRESENTATION]</span>
+                    </div>
+                    <div className="w-full h-[48%] bg-[#0F172A] flex flex-col items-center justify-center">
+                      <span className="font-mono text-[9px] text-white/70 font-bold">PRESENTER (48%)</span>
                     </div>
                   </div>
                 )}
@@ -98,7 +114,7 @@ export const StylePreviewModal: React.FC<Props> = ({
               {card.platform !== "none" ? (
                 <div
                   style={{
-                    top: `${config.cardVerticalPosition}%`,
+                    top: `${effectiveCardY}%`,
                     width: `${config.cardWidthPercent}%`,
                     transform: "translate(-50%, 0)",
                   }}
@@ -189,7 +205,7 @@ export const StylePreviewModal: React.FC<Props> = ({
                 /* Pure Video Floating Kinetic Hook (Phase 3) */
                 <div
                   style={{
-                    top: `${config.cardVerticalPosition}%`,
+                    top: `${effectiveCardY}%`,
                     transform: "translate(-50%, 0)",
                   }}
                   className="absolute left-1/2 z-20 w-[90%] text-center transition-all select-none"
@@ -208,11 +224,16 @@ export const StylePreviewModal: React.FC<Props> = ({
               {/* Caption Typography Layer */}
               <div
                 style={{
-                  top: `${config.subtitleVerticalPosition}%`,
+                  top: `${effectiveSubY}%`,
                   transform: "translate(-50%, -50%)",
                 }}
                 className="absolute left-1/2 z-20 text-center w-full px-4 transition-all pointer-events-none select-none"
               >
+                {isSplitLayout && effectiveSubY === 50 && (
+                  <span className="font-mono text-[7px] text-[#3B82F6] bg-black/75 border border-[#3B82F6]/40 px-1.5 py-0.5 rounded tracking-widest block mb-1 w-fit mx-auto">
+                    [SEAM ALIGNED]
+                  </span>
+                )}
                 <div
                   style={{
                     fontFamily: config.customFontName || caption.fontFamily || "Arial Black",

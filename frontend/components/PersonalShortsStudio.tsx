@@ -363,18 +363,42 @@ export const PersonalShortsStudio: React.FC = () => {
   const [isDraggingSubtitle, setIsDraggingSubtitle] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
 
-  // Restore clips from localStorage on mount so customized work is never lost
+  // Restore clips from localStorage or backend session on mount so customized work is never lost
   useEffect(() => {
+    let hasLocalClips = false;
     try {
       const saved = localStorage.getItem("shortify_clips_v2");
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
           setClips(parsed);
+          hasLocalClips = true;
         }
       }
     } catch (e) {
       console.warn("Failed to restore clips from localStorage", e);
+    }
+
+    if (!hasLocalClips) {
+      fetch("http://localhost:8000/api/v1/shorts/sessions")
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data && Array.isArray(data.clips) && data.clips.length > 0) {
+            const latestVideoId = data.videos?.[0]?.video_id;
+            const relevantClips = latestVideoId
+              ? data.clips.filter((c: any) => c.parent_video_id === latestVideoId)
+              : data.clips;
+            const targetClips = relevantClips.length > 0 ? relevantClips : data.clips;
+            if (targetClips.length > 0) {
+              setClips(targetClips);
+              persistClipsState(targetClips);
+              if (data.videos?.[0]) {
+                setCurrentVideo(data.videos[0]);
+              }
+            }
+          }
+        })
+        .catch((err) => console.warn("Failed to restore from backend session", err));
     }
   }, []);
 

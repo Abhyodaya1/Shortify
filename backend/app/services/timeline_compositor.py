@@ -14,7 +14,7 @@ import re
 import json
 import subprocess
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import httpx
 from dotenv import load_dotenv
 
@@ -224,6 +224,231 @@ class ContentPackagerService:
 class MasterTimelineCompositor:
     """End-to-End Orchestrator for Phase 1 MVP."""
 
+    @staticmethod
+    def calculate_split_geometry(
+        orig_w: int,
+        orig_h: int,
+        out_w: int,
+        out_h: int,
+        centre: Tuple[float, float],
+        tightness: float = 0.8,
+    ) -> Tuple[int, int, int, int, int]:
+        """Computes half-frame crop geometry for stacked two-speaker 9:16 layout (adapted from OpenShorts split_layout).
+        
+        Returns (crop_w, crop_h, crop_x, crop_y, half_h).
+        Applies a 42% headroom offset to prevent burying the speaker's chin or cutting hair.
+        """
+        half_h = out_h // 2
+        aspect = out_w / float(half_h)
+
+        crop_h = int(round(orig_h * tightness))
+        crop_w = int(round(crop_h * aspect))
+        if crop_w > orig_w:
+            crop_w = orig_w
+            crop_h = int(round(crop_w / aspect))
+
+        crop_w -= crop_w % 2
+        crop_h -= crop_h % 2
+
+        cx, cy = centre[0], centre[1]
+        x = int(round(cx - (crop_w / 2.0)))
+        x = max(0, min(x, orig_w - crop_w))
+
+        # Headroom bias: faces sit high in the frame; offset by 42% of crop height
+        y = int(round(cy - (crop_h * 0.42)))
+        y = max(0, min(y, orig_h - crop_h))
+
+        return crop_w, crop_h, x - (x % 2), y - (y % 2), half_h
+
+    @staticmethod
+    def build_split_vstack_filtergraph(
+        orig_w: int,
+        orig_h: int,
+        out_w: int,
+        out_h: int,
+        left_centre: Tuple[float, float],
+        right_centre: Tuple[float, float],
+        card_overlay_path: Optional[Path] = None,
+        card_w: int = 0,
+        card_h: int = 0,
+        card_y: int = 0,
+        subtitles_ass_path: Optional[str] = None,
+    ) -> str:
+        """Builds two-speaker stacked FFmpeg filtergraph:
+        Left speaker cropped into top half (out_w x half_h).
+        Right speaker cropped into bottom half (out_w x half_h).
+        Stacked via vstack filter with seam at half_h.
+        """
+        top_w, top_h, top_x, top_y, half_h = MasterTimelineCompositor.calculate_split_geometry(
+            orig_w, orig_h, out_w, out_h, left_centre
+        )
+        bot_w, bot_h, bot_x, bot_y, _ = MasterTimelineCompositor.calculate_split_geometry(
+            orig_w, orig_h, out_w, out_h, right_centre
+        )
+
+        has_card = card_overlay_path is not None and card_overlay_path.exists()
+        sub_str = f",subtitles='{subtitles_ass_path}'" if subtitles_ass_path else ""
+
+        if has_card:
+            return (
+                f"[0:v]split=2[ta][ba]; "
+                f"[ta]crop=w={top_w}:h={top_h}:x={top_x}:y={top_y},scale={out_w}:{half_h}[top]; "
+                f"[ba]crop=w={bot_w}:h={bot_h}:x={bot_x}:y={bot_y},scale={out_w}:{half_h}[bot]; "
+                f"[top][bot]vstack=inputs=2,pad={out_w}:{out_h}:0:0,setsar=1[stacked]; "
+                f"[1:v]scale={card_w}:{card_h}[card]; "
+                f"[stacked][card]overlay=(W-w)/2:{card_y}:eof_action=pass{sub_str}[v]"
+            )
+        else:
+            return (
+                f"[0:v]split=2[ta][ba]; "
+                f"[ta]crop=w={top_w}:h={top_h}:x={top_x}:y={top_y},scale={out_w}:{half_h}[top]; "
+                f"[ba]crop=w={bot_w}:h={bot_h}:x={bot_x}:y={bot_y},scale={out_w}:{half_h}[bot]; "
+                f"[top][bot]vstack=inputs=2,pad={out_w}:{out_h}:0:0,setsar=1{sub_str}[v]"
+            )
+
+    @staticmethod
+    def build_screencast_filtergraph(
+        orig_w: int,
+        orig_h: int,
+        out_w: int,
+        out_h: int,
+        face_centre: Tuple[float, float],
+        card_overlay_path: Optional[Path] = None,
+        card_w: int = 0,
+        card_h: int = 0,
+        card_y: int = 0,
+        subtitles_ass_path: Optional[str] = None,
+    ) -> str:
+        """Builds OpenShorts screencast layout filtergraph:
+        Top band (52% height): Full-width slide, code, or spreadsheet.
+        Bottom band (48% height): Presenter cropped around face.
+        """
+        top_h = int(out_h * 0.52)
+        bot_h = out_h - top_h
+
+        spk_aspect = out_w / float(bot_h)
+        spk_h = orig_h
+        spk_w = int(round(spk_h * spk_aspect))
+        if spk_w > orig_w:
+            spk_w = orig_w
+            spk_h = int(round(spk_w / spk_aspect))
+        spk_w -= spk_w % 2
+        spk_h -= spk_h % 2
+
+        spk_x = int(round(face_centre[0] - spk_w / 2.0))
+        spk_x = max(0, min(spk_x, orig_w - spk_w))
+        spk_y = int(round(face_centre[1] - spk_h * 0.42))
+        spk_y = max(0, min(spk_y, orig_h - spk_h))
+
+        has_card = card_overlay_path is not None and card_overlay_path.exists()
+        sub_str = f",subtitles='{subtitles_ass_path}'" if subtitles_ass_path else ""
+
+        if has_card:
+            return (
+                f"[0:v]split=2[scr][spk]; "
+                rf"[scr]crop=w={orig_w}:h=min({orig_h}\,{orig_w}*{top_h}/{out_w}):x=0:y=0,scale={out_w}:{top_h}[top]; "
+                f"[spk]crop=w={spk_w}:h={spk_h}:x={spk_x}:y={spk_y},scale={out_w}:{bot_h}[bot]; "
+                f"[top][bot]vstack=inputs=2,pad={out_w}:{out_h}:0:0,setsar=1[stacked]; "
+                f"[1:v]scale={card_w}:{card_h}[card]; "
+                f"[stacked][card]overlay=(W-w)/2:{card_y}:eof_action=pass{sub_str}[v]"
+            )
+        else:
+            return (
+                f"[0:v]split=2[scr][spk]; "
+                rf"[scr]crop=w={orig_w}:h=min({orig_h}\,{orig_w}*{top_h}/{out_w}):x=0:y=0,scale={out_w}:{top_h}[top]; "
+                f"[spk]crop=w={spk_w}:h={spk_h}:x={spk_x}:y={spk_y},scale={out_w}:{bot_h}[bot]; "
+                f"[top][bot]vstack=inputs=2,pad={out_w}:{out_h}:0:0,setsar=1{sub_str}[v]"
+            )
+
+    @staticmethod
+    def build_punch_in_expression(
+        clip_duration: float,
+        punch_times: Optional[List[float]] = None,
+        max_zoom: float = 1.12,
+    ) -> str:
+        """Constructs an asymmetric smoothstep kinetic punch-in zoom expression for FFmpeg (OpenShorts punch_in.py).
+        
+        Applies snap-in (0.25s), hold (1.30s), and smoothstep drift-out (0.55s).
+        Enforces >= 18.0s minimum gap between successive punch-ins.
+        """
+        if not punch_times:
+            punch_times = [3.5]
+            if clip_duration >= 25.0:
+                punch_times.append(22.0)
+
+        zoom_expr = "1.0"
+        for pt in reversed(punch_times):
+            if pt + 2.10 > clip_duration or pt < 0.5:
+                continue
+            t_rise_end = pt + 0.25
+            t_hold_end = t_rise_end + 1.30
+            t_fall_end = t_hold_end + 0.55
+
+            rise_expr = f"(1.0 + {max_zoom - 1.0:.2f} * (3*pow((t-{pt:.2f})/0.25,2) - 2*pow((t-{pt:.2f})/0.25,3)))"
+            fall_expr = f"(1.0 + {max_zoom - 1.0:.2f} * (1.0 - (3*pow((t-{t_hold_end:.2f})/0.55,2) - 2*pow((t-{t_hold_end:.2f})/0.55,3))))"
+
+            pulse = f"if(between(t,{pt:.2f},{t_rise_end:.2f}),{rise_expr},if(between(t,{t_rise_end:.2f},{t_hold_end:.2f}),{max_zoom:.2f},if(between(t,{t_hold_end:.2f},{t_fall_end:.2f}),{fall_expr},{zoom_expr})))"
+            zoom_expr = pulse
+
+        return zoom_expr
+
+    @staticmethod
+    def calculate_collision_free_hook_y(
+        target_height: int,
+        card_height: int,
+        head_boxes: Optional[List[Dict[str, float]]] = None,
+        is_split_layout: bool = False,
+        default_y: Optional[int] = None,
+    ) -> int:
+        """Determines optimal hook card Y-offset to minimize occlusion of faces (OpenShorts hook_placement).
+        
+        Evaluates candidate positions between top safe margin (6%) and bottom margin (75%),
+        penalizing overlap with detected head boxes and avoiding caption bands.
+        """
+        if default_y is not None:
+            return default_y
+
+        if is_split_layout:
+            candidates = [
+                int(target_height * 0.08),  # Safe top margin
+                int(target_height * 0.14),  # Upper chest
+                int(target_height * 0.28),  # Lower chest
+                int(target_height * 0.34),  # Above seam
+            ]
+        else:
+            candidates = [
+                int(target_height * 0.11),  # Default 220px on 1920
+                int(target_height * 0.07),  # High compact
+                int(target_height * 0.16),  # Standard
+                int(target_height * 0.30),  # Mid-chest
+            ]
+
+        if not head_boxes:
+            return candidates[0]
+
+        best_y = candidates[0]
+        min_overlap_cost = float("inf")
+
+        for cand_y in candidates:
+            card_top_norm = cand_y / float(target_height)
+            card_bot_norm = (cand_y + max(1, card_height)) / float(target_height)
+
+            overlap_score = 0.0
+            for box in head_boxes:
+                y0 = max(0.0, box.get("y0", 0.0) - 0.10)
+                y1 = min(1.0, box.get("y1", 0.0) + 0.05)
+
+                iy = max(0.0, min(card_bot_norm, y1) - max(card_top_norm, y0))
+                if iy > 0:
+                    overlap_score += iy
+
+            cost = overlap_score + 0.02 * abs(cand_y - candidates[0]) / float(target_height)
+            if cost < min_overlap_cost:
+                min_overlap_cost = cost
+                best_y = cand_y
+
+        return best_y
+
     @classmethod
     async def process_and_render_clip(
         cls,
@@ -419,6 +644,7 @@ class MasterTimelineCompositor:
             video_height=target_height,
             subtitle_vertical_position=subtitle_vertical_position,
             suppress_headline=has_card,
+            layout_preset=layout_mode,
         )
 
         qa_report = SubtitleQAService.audit_subtitles(
@@ -544,6 +770,14 @@ class MasterTimelineCompositor:
                 from PIL import Image as PILImage
                 with PILImage.open(str(card_overlay_path)) as c_img:
                     c_w, c_h = c_img.size
+                # OpenShorts collision-free dynamic hook placement
+                card_y = cls.calculate_collision_free_hook_y(
+                    target_height=target_height,
+                    card_height=c_h,
+                    head_boxes=crop_info.get("detected_head_boxes"),
+                    is_split_layout=str(layout_mode).lower() in ["split", "split_screen", "split_50_50", "split_60_40", "stacked"],
+                    default_y=int(target_height * (card_vertical_position / 100.0)) if card_vertical_position else None,
+                )
 
         # Dispatch to single-pass or legacy multi-pass renderer
         # Rendering Step: Support single-pass filter_complex or legacy multi-pass
@@ -702,6 +936,7 @@ class MasterTimelineCompositor:
                 with open(report_file, "r", encoding="utf-8") as rf:
                     rep = json.load(rf)
                 time_offset = float(rep.get("hooks", {}).get("opening_hook_duration_sec", 0.0))
+                clip_layout_mode = rep.get("layout", {}).get("layout_mode")
                 hook_txt = rep.get("hooks", {}).get("opening_hook_text", "")
                 if not headline_text:
                     headline_text = rep.get("hooks", {}).get("headline_text")
@@ -739,6 +974,7 @@ class MasterTimelineCompositor:
             time_offset_sec=0.0,
             video_width=video_width,
             video_height=video_height,
+            layout_preset=clip_layout_mode,
         )
 
         encoder = cls._detect_encoder()
@@ -806,10 +1042,86 @@ class MasterTimelineCompositor:
         has_motion = crop_info.get("has_motion", False)
 
 # Render Main Video Stream based on Layout Mode & Overlay
-        is_split = layout_mode in ["split_screen", "split_screen_comment", "split_50_50", "split_60_40", "stacked"] and bg_video and Path(bg_video).exists()
+        is_screencast = str(layout_mode).lower() in ["screencast", "presentation", "slides"]
+        is_two_speaker_split = not is_screencast and layout_mode in ["split", "stacked", "two_speaker", "split_screen", "split_50_50", "split_60_40"] and (
+            crop_info.get("multi_speaker_detected", False) or not bg_video or not Path(bg_video).exists() or layout_mode in ["split", "stacked"]
+        )
+        is_split = not is_screencast and not is_two_speaker_split and layout_mode in ["split_screen", "split_screen_comment", "split_50_50", "split_60_40", "stacked"] and bg_video and Path(bg_video).exists()
         is_ambient = layout_mode in ["fit_ambient_blur", "blurred_bg", "floating", "card", "card_frame", "blurred"]
 
-        if is_split:
+        if is_screencast:
+            face_centre = crop_info.get("left_speaker_center") or (src_w * 0.50, src_h * 0.40)
+            screencast_filter = cls.build_screencast_filtergraph(
+                orig_w=src_w,
+                orig_h=src_h,
+                out_w=target_width,
+                out_h=target_height,
+                face_centre=face_centre,
+                card_overlay_path=card_overlay_path if has_card else None,
+                card_w=c_w,
+                card_h=c_h,
+                card_y=card_y,
+            )
+            main_cmd = [
+                "ffmpeg", "-y",
+                "-ss", f"{start_sec:.3f}",
+                "-i", str(src_path),
+            ]
+            if has_card and card_overlay_path and card_overlay_path.exists():
+                main_cmd.extend(["-i", str(card_overlay_path.resolve())])
+            main_cmd.extend([
+                "-filter_complex", screencast_filter,
+                "-map", "[v]",
+                "-map", "0:a:0",
+                "-t", f"{clip_duration:.3f}",
+                "-r", "30",
+                "-c:v", encoder,
+                "-preset", "fast",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-ar", "48000",
+                "-ac", "2",
+                str(main_clip_raw.resolve()),
+            ])
+        elif is_two_speaker_split:
+            left_centre = crop_info.get("left_speaker_center", (src_w * 0.30, src_h * 0.40))
+            right_centre = crop_info.get("right_speaker_center", (src_w * 0.70, src_h * 0.40))
+            split_filter = cls.build_split_vstack_filtergraph(
+                orig_w=src_w,
+                orig_h=src_h,
+                out_w=target_width,
+                out_h=target_height,
+                left_centre=left_centre,
+                right_centre=right_centre,
+                card_overlay_path=card_overlay_path if has_card else None,
+                card_w=c_w,
+                card_h=c_h,
+                card_y=card_y,
+            )
+            main_cmd = [
+                "ffmpeg", "-y",
+                "-ss", f"{start_sec:.3f}",
+                "-i", str(src_path),
+            ]
+            if has_card and card_overlay_path and card_overlay_path.exists():
+                main_cmd.extend(["-i", str(card_overlay_path.resolve())])
+            main_cmd.extend([
+                "-filter_complex", split_filter,
+                "-map", "[v]",
+                "-map", "0:a:0",
+                "-t", f"{clip_duration:.3f}",
+                "-r", "30",
+                "-c:v", encoder,
+                "-preset", "fast",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-ar", "48000",
+                "-ac", "2",
+                str(main_clip_raw.resolve()),
+            ])
+        elif is_split:
             scale_pct = max(30, min(80, video_scale_percent))
             top_h = int(target_height * (scale_pct / 100))
             if top_h % 2 != 0:
@@ -1221,10 +1533,88 @@ class MasterTimelineCompositor:
         crop_expr = crop_info.get("crop_expr", str(crop_x))
         has_motion = crop_info.get("has_motion", False)
 
-        is_split = layout_mode in ["split_screen", "split_screen_comment", "split_50_50", "split_60_40", "stacked"] and bg_video and Path(bg_video).exists()
+        is_screencast = str(layout_mode).lower() in ["screencast", "presentation", "slides"]
+        is_two_speaker_split = not is_screencast and layout_mode in ["split", "stacked", "two_speaker", "split_screen", "split_50_50", "split_60_40"] and (
+            crop_info.get("multi_speaker_detected", False) or not bg_video or not Path(bg_video).exists() or layout_mode in ["split", "stacked"]
+        )
+        is_split = not is_screencast and not is_two_speaker_split and layout_mode in ["split_screen", "split_screen_comment", "split_50_50", "split_60_40", "stacked"] and bg_video and Path(bg_video).exists()
         is_ambient = layout_mode in ["fit_ambient_blur", "blurred_bg", "floating", "card", "card_frame", "blurred"]
 
-        if is_split:
+        if is_screencast:
+            face_centre = crop_info.get("left_speaker_center") or (src_w * 0.50, src_h * 0.40)
+            screencast_filter = cls.build_screencast_filtergraph(
+                orig_w=src_w,
+                orig_h=src_h,
+                out_w=target_width,
+                out_h=target_height,
+                face_centre=face_centre,
+                card_overlay_path=card_overlay_path if has_card else None,
+                card_w=c_w,
+                card_h=c_h,
+                card_y=card_y,
+                subtitles_ass_path=escaped_ass,
+            )
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", f"{start_sec:.3f}",
+                "-i", str(src_path),
+            ]
+            if has_card and card_overlay_path and card_overlay_path.exists():
+                cmd.extend(["-i", str(card_overlay_path.resolve())])
+            cmd.extend([
+                "-filter_complex", screencast_filter,
+                "-map", "[v]",
+                "-map", "0:a:0",
+                "-t", f"{clip_duration:.3f}",
+                "-r", "30",
+                "-c:v", encoder,
+                "-preset", "fast",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-ar", "48000",
+                "-ac", "2",
+                str(final_mp4.resolve()),
+            ])
+        elif is_two_speaker_split:
+            left_centre = crop_info.get("left_speaker_center", (src_w * 0.30, src_h * 0.40))
+            right_centre = crop_info.get("right_speaker_center", (src_w * 0.70, src_h * 0.40))
+            split_filter = cls.build_split_vstack_filtergraph(
+                orig_w=src_w,
+                orig_h=src_h,
+                out_w=target_width,
+                out_h=target_height,
+                left_centre=left_centre,
+                right_centre=right_centre,
+                card_overlay_path=card_overlay_path if has_card else None,
+                card_w=c_w,
+                card_h=c_h,
+                card_y=card_y,
+                subtitles_ass_path=escaped_ass,
+            )
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", f"{start_sec:.3f}",
+                "-i", str(src_path),
+            ]
+            if has_card and card_overlay_path and card_overlay_path.exists():
+                cmd.extend(["-i", str(card_overlay_path.resolve())])
+            cmd.extend([
+                "-filter_complex", split_filter,
+                "-map", "[v]",
+                "-map", "0:a:0",
+                "-t", f"{clip_duration:.3f}",
+                "-r", "30",
+                "-c:v", encoder,
+                "-preset", "fast",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-ar", "48000",
+                "-ac", "2",
+                str(final_mp4.resolve()),
+            ])
+        elif is_split:
             scale_pct = max(30, min(80, video_scale_percent))
             top_h = int(target_height * (scale_pct / 100))
             if top_h % 2 != 0:

@@ -374,6 +374,7 @@ class KineticSubtitleCompiler:
         video_height: int = 1920,
         subtitle_vertical_position: Optional[int] = None,
         suppress_headline: bool = False,
+        layout_preset: Optional[str] = None,
     ) -> str:
         """Generates an ASS subtitle file from acoustic word timestamps.
         
@@ -403,10 +404,18 @@ class KineticSubtitleCompiler:
         all_caps = custom_all_caps if custom_all_caps is not None else preset.get("all_caps", True)
         outline_w = custom_outline_width if custom_outline_width is not None else preset["outline_width"]
 
-        if subtitle_vertical_position is not None:
+        is_split = str(layout_preset or "").lower() in ["split", "split_screen", "split_50_50", "split_60_40", "stacked"]
+        if is_split and subtitle_vertical_position is None:
+            # OpenShorts seam caption pattern: anchor text precisely along dividing seam between speakers
+            sub_alignment = 5  # Middle-center alignment
+            margin_v = 0
+        elif subtitle_vertical_position is not None:
             if subtitle_vertical_position <= 35:
                 sub_alignment = 8  # Top-center alignment
                 margin_v = max(30, int(video_height * (subtitle_vertical_position / 100.0)))
+            elif 45 <= subtitle_vertical_position <= 55:
+                sub_alignment = 5  # Middle-center alignment (seam)
+                margin_v = 0
             else:
                 sub_alignment = 2  # Bottom-center alignment
                 margin_v = max(40, int(video_height * ((100 - subtitle_vertical_position) / 100.0)))

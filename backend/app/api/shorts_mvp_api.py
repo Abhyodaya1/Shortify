@@ -190,8 +190,19 @@ async def discover_clips(payload: DiscoverClipsRequest):
         profile=active_profile,
     )
 
-    # 3. Compute Face Tracking for each clip
+    # 3. Apply vocal attack/decay buffering (80ms/150ms) and compute Face Tracking for each clip
+    total_vid_dur = float(video.get("duration_sec", 99999.0))
     for clip in clips:
+        # OpenShorts Phase 1 Audio Attack & Decay Buffering:
+        # Pre-roll 80ms to preserve attack transients, post-roll 150ms for natural vocal decay
+        raw_start = float(clip["start_sec"])
+        raw_end = float(clip["end_sec"])
+        buffered_start = max(0.0, round(raw_start - 0.08, 2))
+        buffered_end = min(total_vid_dur, round(raw_end + 0.15, 2))
+        clip["start_sec"] = buffered_start
+        clip["end_sec"] = buffered_end
+        clip["duration_sec"] = round(buffered_end - buffered_start, 2)
+
         crop_info = face_reframer.track_clip_faces(
             video_filepath=filepath,
             start_sec=clip["start_sec"],
