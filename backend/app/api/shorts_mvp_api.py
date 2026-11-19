@@ -203,12 +203,34 @@ async def discover_clips(payload: DiscoverClipsRequest):
         clip["end_sec"] = buffered_end
         clip["duration_sec"] = round(buffered_end - buffered_start, 2)
 
-        crop_info = face_reframer.track_clip_faces(
-            video_filepath=filepath,
-            start_sec=clip["start_sec"],
-            end_sec=clip["end_sec"],
-            sample_fps=3.0,
-        )
+        crop_info = None
+        clip_source_path = filepath
+        track_start = clip["start_sec"]
+        track_end = clip["end_sec"]
+
+        if video.get("is_targeted_ranges") or not (filepath and os.path.exists(filepath)):
+            if video.get("url"):
+                try:
+                    clip_source_path = IngestionService.download_clip_section(
+                        url=video["url"],
+                        start_sec=clip["start_sec"],
+                        end_sec=clip["end_sec"],
+                        clip_id=clip["clip_id"],
+                    )
+                    clip["source_clip_path"] = clip_source_path
+                    track_start = 0.0
+                    track_end = clip["duration_sec"]
+                except Exception as dl_err:
+                    import logging
+                    logging.getLogger("shorts_mvp").warning(f"Targeted range download fallback: {dl_err}")
+
+        if clip_source_path and os.path.exists(clip_source_path):
+            crop_info = face_reframer.track_clip_faces(
+                video_filepath=clip_source_path,
+                start_sec=track_start,
+                end_sec=track_end,
+                sample_fps=3.0,
+            )
         clip["crop_data"] = crop_info
         clip["parent_video_id"] = payload.video_id
         clip["layout_mode"] = payload.layout_mode
@@ -380,10 +402,30 @@ async def render_clip(payload: RenderClipRequest):
             if default_bg.exists():
                 bg_video_path = str(default_bg.resolve())
 
+    # Resolve source video file and start/end boundaries (supports targeted range clips)
+    source_path = video.get("filepath", "")
+    r_start = clip["start_sec"]
+    r_end = clip["end_sec"]
+
+    if clip.get("source_clip_path") and os.path.exists(clip["source_clip_path"]):
+        source_path = clip["source_clip_path"]
+        r_start = 0.0
+        r_end = clip["duration_sec"]
+    elif video.get("is_targeted_ranges") and video.get("url"):
+        source_path = IngestionService.download_clip_section(
+            url=video["url"],
+            start_sec=clip["start_sec"],
+            end_sec=clip["end_sec"],
+            clip_id=payload.clip_id,
+        )
+        clip["source_clip_path"] = source_path
+        r_start = 0.0
+        r_end = clip["duration_sec"]
+
     report = await MasterTimelineCompositor.process_and_render_clip(
-        source_video_path=video["filepath"],
-        start_sec=clip["start_sec"],
-        end_sec=clip["end_sec"],
+        source_video_path=source_path,
+        start_sec=r_start,
+        end_sec=r_end,
         clip_id=payload.clip_id,
         output_dir=str(clip_render_dir),
         crop_data=clip.get("crop_data"),

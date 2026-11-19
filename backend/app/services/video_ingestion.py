@@ -25,10 +25,13 @@ class IngestionService:
 
     GROQ_API_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
     WHISPER_MODEL = "whisper-large-v3-turbo"
+    TARGETED_DOWNLOAD_THRESHOLD_SEC = 900.0  # Videos > 15 minutes use fast metadata-first range ingestion
 
     @classmethod
     def ingest_youtube_url(cls, url: str) -> Dict[str, Any]:
-        """Downloads metadata, video stream, and extracts real speech transcripts."""
+        """Downloads metadata, video stream, and extracts real speech transcripts.
+        For videos > 15 minutes, employs fast metadata & caption-first ingestion with targeted range downloads.
+        """
         import yt_dlp
         from youtube_transcript_api import YouTubeTranscriptApi
 
@@ -36,39 +39,39 @@ class IngestionService:
         clean_url, validated_yt_id = URLSecurityValidator.validate_url(url)
 
         video_id = str(uuid4())[:8]
-        out_template = str(STORAGE_UPLOADS / f"yt_{video_id}.%(ext)s")
 
-        # 1. Extract metadata and download video with extractor constraints
-        ydl_opts = {
-            "format": "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-            "outtmpl": out_template,
+        # 1. Fast metadata extraction WITHOUT downloading video (completes in 1-2s)
+        meta_opts = {
             "quiet": True,
             "no_warnings": True,
             "noplaylist": True,
             "allowed_extractors": ["youtube", "youtube:tab"],
         }
-
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(clean_url, download=True)
-                title = info.get("title", "YouTube Video")
-                duration = info.get("duration", 0)
-                thumbnail = info.get("thumbnail", "")
-                yt_id = info.get("id", validated_yt_id)
-                video_filepath = ydl.prepare_filename(info)
-                # In case extension changed
-                if not os.path.exists(video_filepath):
-                    potential = list(STORAGE_UPLOADS.glob(f"yt_{video_id}.*"))
-                    if potential:
-                        video_filepath = str(potential[0])
+            with yt_dlp.YoutubeDL(meta_opts) as ydl:
+                info = ydl.extract_info(clean_url, download=False)
         except Exception as e:
-            raise RuntimeError(f"Failed to download YouTube video: {str(e)}")
+            raise RuntimeError(f"Failed to fetch YouTube metadata: {str(e)}")
+
+        title = info.get("title", "YouTube Video")
+        duration = float(info.get("duration", 0) or 0)
+        thumbnail = info.get("thumbnail", "")
+        yt_id = info.get("id", validated_yt_id)
+        width = int(info.get("width") or 1920)
+        height = int(info.get("height") or 1080)
+        fps = float(info.get("fps") or 30.0)
 
         # 2. Retrieve transcript with timestamps
         transcript_cues: List[Dict[str, Any]] = []
         if yt_id:
             try:
-                transcript_list = YouTubeTranscriptApi.list_transcripts(yt_id)
+                if hasattr(YouTubeTranscriptApi, "list_transcripts"):
+                    transcript_list = YouTubeTranscriptApi.list_transcripts(yt_id)
+                elif hasattr(YouTubeTranscriptApi, "list"):
+                    transcript_list = YouTubeTranscriptApi.list(yt_id)
+                else:
+                    transcript_list = YouTubeTranscriptApi().list(yt_id)
+
                 try:
                     t = transcript_list.find_transcript(["en", "en-US", "en-GB", "en-IN", "hi"])
                 except Exception:
@@ -89,28 +92,192 @@ class IngestionService:
             except Exception:
                 pass
 
-        # 3. If YouTube captions are missing/unavailable, transcribe real audio directly via Groq Whisper
-        if not transcript_cues and os.path.exists(video_filepath):
-            transcript_cues = cls.transcribe_media_audio(video_filepath)
+        is_long_video = duration > cls.TARGETED_DOWNLOAD_THRESHOLD_SEC or info.get("live_status") in ("is_live", "post_live")
+        video_filepath = ""
+
+        # 3. Audio/Video Ingestion Strategy
+        if is_long_video:
+            # Long video (1h, 10h+, 24h VOD): DO NOT download 20GB video upfront!
+            # If captions are missing, download audio-only and chunk for Whisper
+            if not transcript_cues:
+                temp_audio_out = str(STORAGE_UPLOADS / f"yt_audio_{video_id}.%(ext)s")
+                # For long videos (> 1 hour), bound fallback audio download to a 1-hour window (3600s)
+                # to prevent downloading 40,000+ HLS live fragments and exhausting bandwidth/rate limits
+                max_scan_sec = min(duration, 3600.0) if duration > 3600.0 else duration
+                audio_opts = {
+                    "format": "bestaudio[ext=m4a]/bestaudio/best",
+                    "outtmpl": temp_audio_out,
+                    "download_ranges": yt_dlp.utils.download_range_func(None, [(0.0, max_scan_sec)]),
+                    "force_keyframes_at_cuts": True,
+                    "quiet": True,
+                    "no_warnings": True,
+                    "noplaylist": True,
+                }
+                with yt_dlp.YoutubeDL(audio_opts) as ydl:
+                    ydl.download([clean_url])
+                audio_files = list(STORAGE_UPLOADS.glob(f"yt_audio_{video_id}.*"))
+                if audio_files:
+                    transcript_cues = cls.transcribe_long_media_audio(str(audio_files[0]))
+                    try:
+                        audio_files[0].unlink()
+                    except Exception:
+                        pass
+        else:
+            # Short video (<= 15 min): Download full video upfront
+            out_template = str(STORAGE_UPLOADS / f"yt_{video_id}.%(ext)s")
+            ydl_opts = {
+                "format": "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+                "outtmpl": out_template,
+                "quiet": True,
+                "no_warnings": True,
+                "noplaylist": True,
+                "allowed_extractors": ["youtube", "youtube:tab"],
+            }
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([clean_url])
+                potential = list(STORAGE_UPLOADS.glob(f"yt_{video_id}.*"))
+                if potential:
+                    video_filepath = str(potential[0].resolve())
+                    dims = cls.get_video_dimensions(video_filepath)
+                    width, height, fps = dims
+            except Exception as e:
+                raise RuntimeError(f"Failed to download YouTube video: {str(e)}")
+
+            if not transcript_cues and video_filepath and os.path.exists(video_filepath):
+                transcript_cues = cls.transcribe_media_audio(video_filepath)
 
         if not transcript_cues:
             raise RuntimeError("No speech detected in audio track. Video must contain spoken dialogue to extract viral shorts.")
 
-        dimensions = cls.get_video_dimensions(video_filepath)
-
         return {
             "video_id": video_id,
             "source_type": "youtube",
-            "url": url,
+            "url": clean_url,
             "title": title,
             "duration_sec": duration,
             "thumbnail": thumbnail,
-            "filepath": str(Path(video_filepath).resolve()),
-            "width": dimensions[0],
-            "height": dimensions[1],
-            "fps": dimensions[2],
+            "filepath": video_filepath,
+            "width": width,
+            "height": height,
+            "fps": fps,
             "transcript_cues": transcript_cues,
+            "is_targeted_ranges": is_long_video,
         }
+
+    @classmethod
+    def download_clip_section(
+        cls,
+        url: str,
+        start_sec: float,
+        end_sec: float,
+        clip_id: str,
+        pre_pad_sec: float = 1.0,
+        post_pad_sec: float = 1.0,
+    ) -> str:
+        """Downloads only the specified 30-60s range of a YouTube video using HTTP range requests.
+        Bypasses downloading multi-hour raw video streams entirely.
+        """
+        import yt_dlp
+        target_path = STORAGE_UPLOADS / f"clip_src_{clip_id}.mp4"
+        if target_path.exists() and target_path.stat().st_size > 10000:
+            return str(target_path.resolve())
+
+        clean_url, _ = URLSecurityValidator.validate_url(url)
+        pad_start = max(0.0, start_sec - pre_pad_sec)
+        pad_end = end_sec + post_pad_sec
+
+        temp_out = STORAGE_UPLOADS / f"raw_range_{clip_id}.%(ext)s"
+        ydl_opts = {
+            "format": "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "outtmpl": str(temp_out),
+            "download_ranges": yt_dlp.utils.download_range_func(None, [(pad_start, pad_end)]),
+            "force_keyframes_at_cuts": True,
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "allowed_extractors": ["youtube", "youtube:tab"],
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([clean_url])
+
+        candidates = list(STORAGE_UPLOADS.glob(f"raw_range_{clip_id}.*"))
+        if not candidates:
+            raise RuntimeError(f"Failed to download clip range [{start_sec:.2f}-{end_sec:.2f}] for clip {clip_id}")
+
+        raw_downloaded = candidates[0]
+        trim_offset = start_sec - pad_start
+        trim_duration = end_sec - start_sec
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-ss", f"{trim_offset:.3f}",
+            "-i", str(raw_downloaded),
+            "-t", f"{trim_duration:.3f}",
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-c:a", "aac",
+            str(target_path),
+        ]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
+        try:
+            raw_downloaded.unlink()
+        except Exception:
+            pass
+
+        if not target_path.exists() or target_path.stat().st_size == 0:
+            raise RuntimeError(f"FFmpeg trim failed for clip range: {res.stderr}")
+
+        return str(target_path.resolve())
+
+    @classmethod
+    def transcribe_long_media_audio(cls, audio_filepath: str, chunk_duration_sec: int = 1800) -> List[Dict[str, Any]]:
+        """Splits long audio into 30-minute chunks and transcribes each chunk via Groq Whisper."""
+        duration = cls.get_video_duration(audio_filepath)
+        if duration <= chunk_duration_sec:
+            return cls.transcribe_media_audio(audio_filepath)
+
+        chunk_dir = STORAGE_UPLOADS / f"chunks_{uuid4().hex[:6]}"
+        chunk_dir.mkdir(parents=True, exist_ok=True)
+        chunk_template = str(chunk_dir / "part_%03d.mp3")
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(Path(audio_filepath).resolve()),
+            "-vn",
+            "-ar", "16000",
+            "-ac", "1",
+            "-b:a", "32k",
+            "-f", "segment",
+            "-segment_time", str(chunk_duration_sec),
+            chunk_template,
+        ]
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
+        parts = sorted(list(chunk_dir.glob("part_*.mp3")))
+        all_cues: List[Dict[str, Any]] = []
+
+        for idx, part in enumerate(parts):
+            offset_sec = idx * chunk_duration_sec
+            try:
+                part_cues = cls.transcribe_media_audio(str(part))
+                for cue in part_cues:
+                    cue["start_sec"] = round(cue["start_sec"] + offset_sec, 2)
+                    cue["end_sec"] = round(cue["end_sec"] + offset_sec, 2)
+                    all_cues.append(cue)
+            finally:
+                try:
+                    part.unlink()
+                except Exception:
+                    pass
+
+        try:
+            chunk_dir.rmdir()
+        except Exception:
+            pass
+
+        return all_cues
 
     @classmethod
     def ingest_local_file(cls, source_path: str, filename: str) -> Dict[str, Any]:

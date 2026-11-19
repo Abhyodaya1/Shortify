@@ -74,6 +74,10 @@ class URLSecurityValidator:
                 video_id = parsed.path.split("/shorts/")[1].split("/")[0]
             elif parsed.path.startswith("/embed/"):
                 video_id = parsed.path.split("/embed/")[1].split("/")[0]
+            elif parsed.path.startswith("/live/"):
+                video_id = parsed.path.split("/live/")[1].split("/")[0]
+            elif parsed.path.startswith("/v/"):
+                video_id = parsed.path.split("/v/")[1].split("/")[0]
 
         if not video_id or not cls.VIDEO_ID_PATTERN.match(video_id):
             raise ValueError(f"Invalid or missing YouTube video ID in URL: {url}")

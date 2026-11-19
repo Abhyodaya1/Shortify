@@ -42,6 +42,14 @@ class TestURLSecurityValidator:
         url, vid = URLSecurityValidator.validate_url("https://www.youtube.com/embed/dQw4w9WgXcQ")
         assert vid == "dQw4w9WgXcQ"
 
+        # Live URL
+        url, vid = URLSecurityValidator.validate_url("https://www.youtube.com/live/qSyo5d-dVzA?si=W60Ejo-WJz6uYNob")
+        assert vid == "qSyo5d-dVzA"
+
+        # Legacy /v/ URL
+        url, vid = URLSecurityValidator.validate_url("https://www.youtube.com/v/dQw4w9WgXcQ")
+        assert vid == "dQw4w9WgXcQ"
+
     def test_disallowed_schemes_rejected(self):
         """file://, ftp://, gopher:// and other non-http(s) schemes must be rejected."""
         disallowed = [
