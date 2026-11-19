@@ -25,10 +25,12 @@ async def lifespan(app: FastAPI):
     PersistentScheduler.init_db()
 
     # Avoid spawning the infinite background polling loop during pytest or automated test runs
+    import sys
     is_test_env = (
         os.getenv("TESTING", "").lower() in ("1", "true", "yes")
         or os.getenv("DISABLE_BACKGROUND_WORKER", "").lower() in ("1", "true", "yes")
         or "PYTEST_CURRENT_TEST" in os.environ
+        or "pytest" in sys.modules
     )
 
     worker = None
