@@ -5,6 +5,7 @@ Conforms to 03_IMPLEMENTATION_SPEC.md.
 from __future__ import annotations
 import os
 import re
+import math
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query, status
@@ -58,6 +59,33 @@ class DiscoverClipsRequest(BaseModel):
     custom_primary_color: Optional[str] = Field(default=None, description="Non-highlighted text color hex e.g. #FFFFFF")
     custom_font_name: Optional[str] = Field(default=None, description="Font family override e.g. Arial Black, Impact, Space Grotesk")
     custom_animation: Optional[str] = Field(default=None, description="Animation type: word_pop, glow_pulse, fade_in, slide_up, karaoke")
+    custom_all_caps: Optional[bool] = Field(default=None, description="Whether to uppercase text")
+    custom_outline_width: Optional[float] = Field(default=None, description="Custom stroke thickness")
+    tts_voice: Optional[str] = Field(default=None, description="TTS voice override")
+
+
+class ProgressiveBatchRequest(BaseModel):
+    video_id: str = Field(..., description="ID of ingested video")
+    batch_index: int = Field(default=0, ge=0, description="0-indexed 1-hour batch index (e.g. 0=0-1h, 1=1-2h)")
+    batch_duration_sec: float = Field(default=3600.0, ge=60.0, description="Batch window duration in seconds")
+    duration_mode: str = Field(default="31s", description="'31s' or '45s'")
+    layout_mode: str = Field(default="split_screen", description="Layout mode")
+    card_type: Optional[str] = Field(default=None, description="Card archetype")
+    background_id: Optional[str] = Field(default="minecraft_parkour", description="Background video ID")
+    video_scale_percent: int = Field(default=48, description="Main video height percent")
+    auto_hook: bool = Field(default=False, description="Enable AI hook voiceover")
+    social_author: Optional[str] = Field(default="Peak Heist Clips", description="Social author name")
+    social_handle: Optional[str] = Field(default="@peakheistclips", description="Social handle")
+    social_badge: Optional[str] = Field(default="verified", description="Verified badge")
+    social_text: Optional[str] = Field(default=None, description="Custom social text")
+    card_vertical_position: Optional[int] = Field(default=20, description="Card vertical position")
+    card_width_percent: Optional[int] = Field(default=90, description="Card width scale")
+    subtitle_vertical_position: Optional[int] = Field(default=75, description="Subtitle vertical position")
+    subtitle_preset: str = Field(default="mrbeast", description="Subtitle preset ID")
+    custom_active_color: Optional[str] = Field(default=None, description="Active word hex")
+    custom_primary_color: Optional[str] = Field(default=None, description="Primary word hex")
+    custom_font_name: Optional[str] = Field(default=None, description="Font family override")
+    custom_animation: Optional[str] = Field(default=None, description="Animation type")
     custom_all_caps: Optional[bool] = Field(default=None, description="Whether to uppercase text")
     custom_outline_width: Optional[float] = Field(default=None, description="Custom stroke thickness")
     tts_voice: Optional[str] = Field(default=None, description="TTS voice override")
@@ -121,6 +149,9 @@ def ingest_youtube_url(payload: IngestUrlRequest):
         video_data = IngestionService.ingest_youtube_url(payload.url)
         vid_id = video_data["video_id"]
         ingested_videos[vid_id] = video_data
+        duration = float(video_data.get("duration_sec", 0.0))
+        is_long = video_data.get("is_targeted_ranges", False)
+        total_batches = max(1, math.ceil(duration / 3600.0)) if is_long else 1
         return {
             "video_id": vid_id,
             "title": video_data["title"],
@@ -129,6 +160,8 @@ def ingest_youtube_url(payload: IngestUrlRequest):
             "width": video_data["width"],
             "height": video_data["height"],
             "cue_count": len(video_data["transcript_cues"]),
+            "is_targeted_ranges": is_long,
+            "total_batches": total_batches,
         }
     except SSRFSecurityError as e:
         raise HTTPException(status_code=403, detail=f"Security violation: {str(e)}")
@@ -156,6 +189,8 @@ async def upload_local_file(file: UploadFile = File(...)):
     video_data = IngestionService.ingest_local_file(str(temp_path), clean_name)
     vid_id = video_data["video_id"]
     ingested_videos[vid_id] = video_data
+    duration = float(video_data.get("duration_sec", 0.0))
+    total_batches = max(1, math.ceil(duration / 3600.0)) if duration > 3600.0 else 1
 
     return {
         "video_id": vid_id,
@@ -165,7 +200,70 @@ async def upload_local_file(file: UploadFile = File(...)):
         "width": video_data["width"],
         "height": video_data["height"],
         "cue_count": len(video_data["transcript_cues"]),
+        "is_targeted_ranges": duration > 900.0,
+        "total_batches": total_batches,
     }
+
+
+def _enrich_and_store_clip(clip: Dict[str, Any], video: Dict[str, Any], payload: Any) -> Dict[str, Any]:
+    total_vid_dur = float(video.get("duration_sec", 99999.0))
+    filepath = video.get("filepath", "")
+
+    # OpenShorts Phase 1 Audio Attack & Decay Buffering:
+    # Pre-roll 80ms to preserve attack transients, post-roll 150ms for natural vocal decay
+    raw_start = float(clip["start_sec"])
+    raw_end = float(clip["end_sec"])
+    buffered_start = max(0.0, round(raw_start - 0.08, 2))
+    buffered_end = min(total_vid_dur, round(raw_end + 0.15, 2))
+    clip["start_sec"] = buffered_start
+    clip["end_sec"] = buffered_end
+    clip["duration_sec"] = round(buffered_end - buffered_start, 2)
+
+    crop_info = None
+    clip_source_path = filepath
+    track_start = clip["start_sec"]
+    track_end = clip["end_sec"]
+
+    # Progressive / Targeted Range Ingestion Architecture:
+    # For long videos, do NOT eagerly download video ranges during transcript discovery.
+    # Discovery evaluates text in seconds. Targeted Range Download is executed on-demand
+    # when rendering the selected 45s clips in render_clip().
+    if video.get("is_targeted_ranges"):
+        clip_source_path = ""
+    elif filepath and os.path.exists(filepath):
+        clip_source_path = filepath
+    else:
+        clip_source_path = ""
+
+    if clip_source_path and os.path.exists(clip_source_path):
+        crop_info = face_reframer.track_clip_faces(
+            video_filepath=clip_source_path,
+            start_sec=track_start,
+            end_sec=track_end,
+            sample_fps=3.0,
+        )
+    clip["crop_data"] = crop_info
+    clip["parent_video_id"] = payload.video_id
+    clip["batch_index"] = getattr(payload, "batch_index", 0)
+    clip["layout_mode"] = payload.layout_mode
+    clip["card_type"] = payload.card_type
+    clip["background_id"] = payload.background_id
+    clip["video_scale_percent"] = getattr(payload, "video_scale_percent", 48)
+    clip["social_author"] = payload.social_author
+    clip["social_handle"] = payload.social_handle
+    clip["social_badge"] = payload.social_badge
+    clip["social_text"] = payload.social_text
+    clip["subtitle_preset"] = payload.subtitle_preset
+    clip["custom_active_color"] = payload.custom_active_color
+    clip["custom_primary_color"] = payload.custom_primary_color
+    clip["custom_font_name"] = payload.custom_font_name
+    clip["custom_animation"] = payload.custom_animation
+    clip["custom_all_caps"] = payload.custom_all_caps
+    clip["card_vertical_position"] = payload.card_vertical_position
+    clip["card_width_percent"] = payload.card_width_percent
+    clip["subtitle_vertical_position"] = payload.subtitle_vertical_position
+    discovered_clips[clip["clip_id"]] = clip
+    return clip
 
 
 @router.post("/discover-clips", summary="Analyze video, run face tracking, and discover viral clips")
@@ -175,15 +273,20 @@ async def discover_clips(payload: DiscoverClipsRequest):
         raise HTTPException(status_code=404, detail="Video not found. Please ingest first.")
 
     video = ingested_videos[payload.video_id]
-    cues = video["transcript_cues"]
+    cues = list(video["transcript_cues"])
     title = video["title"]
-    filepath = video["filepath"]
+    total_vid_dur = float(video.get("duration_sec", 99999.0))
+
+    # For long videos (>1h), limit the initial discover pass to the first hour (3600s)
+    # so the user receives their first batch of clips immediately (e.g. in ~30s)
+    if video.get("is_targeted_ranges") and total_vid_dur > 3600.0:
+        cues = [c for c in cues if float(c.get("start_sec", 0)) <= 3600.0]
 
     # 1. Snapshot the active editorial profile for this generation job
     active_profile = ProfileStore.get_active_profile()
 
     # 2. AI Content & Clip Selection targeting requested duration mode
-    clips = await SmartClipSelector.discover_clips(
+    raw_clips = await SmartClipSelector.discover_clips(
         cues=cues,
         video_title=title,
         duration_mode=payload.duration_mode,
@@ -191,70 +294,16 @@ async def discover_clips(payload: DiscoverClipsRequest):
     )
 
     # 3. Apply vocal attack/decay buffering (80ms/150ms) and compute Face Tracking for each clip
-    total_vid_dur = float(video.get("duration_sec", 99999.0))
-    for clip in clips:
-        # OpenShorts Phase 1 Audio Attack & Decay Buffering:
-        # Pre-roll 80ms to preserve attack transients, post-roll 150ms for natural vocal decay
-        raw_start = float(clip["start_sec"])
-        raw_end = float(clip["end_sec"])
-        buffered_start = max(0.0, round(raw_start - 0.08, 2))
-        buffered_end = min(total_vid_dur, round(raw_end + 0.15, 2))
-        clip["start_sec"] = buffered_start
-        clip["end_sec"] = buffered_end
-        clip["duration_sec"] = round(buffered_end - buffered_start, 2)
-
-        crop_info = None
-        clip_source_path = filepath
-        track_start = clip["start_sec"]
-        track_end = clip["end_sec"]
-
-        if video.get("is_targeted_ranges") or not (filepath and os.path.exists(filepath)):
-            if video.get("url"):
-                try:
-                    clip_source_path = IngestionService.download_clip_section(
-                        url=video["url"],
-                        start_sec=clip["start_sec"],
-                        end_sec=clip["end_sec"],
-                        clip_id=clip["clip_id"],
-                    )
-                    clip["source_clip_path"] = clip_source_path
-                    track_start = 0.0
-                    track_end = clip["duration_sec"]
-                except Exception as dl_err:
-                    import logging
-                    logging.getLogger("shorts_mvp").warning(f"Targeted range download fallback: {dl_err}")
-
-        if clip_source_path and os.path.exists(clip_source_path):
-            crop_info = face_reframer.track_clip_faces(
-                video_filepath=clip_source_path,
-                start_sec=track_start,
-                end_sec=track_end,
-                sample_fps=3.0,
-            )
-        clip["crop_data"] = crop_info
-        clip["parent_video_id"] = payload.video_id
-        clip["layout_mode"] = payload.layout_mode
-        clip["card_type"] = payload.card_type
-        clip["background_id"] = payload.background_id
-        clip["social_author"] = payload.social_author
-        clip["social_handle"] = payload.social_handle
-        clip["social_badge"] = payload.social_badge
-        clip["social_text"] = payload.social_text
-        clip["subtitle_preset"] = payload.subtitle_preset
-        clip["custom_active_color"] = payload.custom_active_color
-        clip["custom_primary_color"] = payload.custom_primary_color
-        clip["custom_font_name"] = payload.custom_font_name
-        clip["custom_animation"] = payload.custom_animation
-        clip["custom_all_caps"] = payload.custom_all_caps
-        clip["card_vertical_position"] = payload.card_vertical_position
-        clip["card_width_percent"] = payload.card_width_percent
-        clip["subtitle_vertical_position"] = payload.subtitle_vertical_position
-        discovered_clips[clip["clip_id"]] = clip
+    clips = []
+    for raw_clip in raw_clips:
+        enriched = _enrich_and_store_clip(raw_clip, video, payload)
+        clips.append(enriched)
 
     batch_msg = clips[0].get("batch_message") if clips else "No Shorts candidates found."
     sel_mode = clips[0].get("selection_mode", "empty") if clips else "empty"
     is_fb = clips[0].get("is_fallback", False) if clips else False
     qual_cnt = clips[0].get("qualifying_count", 0) if clips else 0
+    total_batches = max(1, math.ceil(total_vid_dur / 3600.0)) if video.get("is_targeted_ranges") else 1
 
     return {
         "video_id": payload.video_id,
@@ -266,6 +315,108 @@ async def discover_clips(payload: DiscoverClipsRequest):
         "qualifying_count": qual_cnt,
         "profile_snapshot": active_profile.snapshot(),
         "clips": clips,
+        "total_batches": total_batches,
+        "batch_index": 0,
+    }
+
+
+@router.post("/progressive-batch", summary="Progressive 1-hour batch analysis for long videos")
+async def progressive_batch(payload: ProgressiveBatchRequest):
+    """Processes a specific 1-hour slice of a long video in the background.
+    Downloads targeted audio, transcribes with Whisper if missing, discovers clips,
+    and returns newly extracted candidate clips to progressively append to the UI feed.
+    """
+    if payload.video_id not in ingested_videos:
+        raise HTTPException(status_code=404, detail="Video not found. Please ingest first.")
+
+    video = ingested_videos[payload.video_id]
+    total_dur = float(video.get("duration_sec", 0.0))
+    total_batches = max(1, math.ceil(total_dur / payload.batch_duration_sec)) if total_dur > 0 else 1
+
+    start_sec = payload.batch_index * payload.batch_duration_sec
+    end_sec = min(total_dur, (payload.batch_index + 1) * payload.batch_duration_sec)
+
+    if start_sec >= total_dur:
+        return {
+            "video_id": payload.video_id,
+            "batch_index": payload.batch_index,
+            "batch_start_sec": start_sec,
+            "batch_end_sec": end_sec,
+            "total_batches": total_batches,
+            "is_last_batch": True,
+            "new_clips": [],
+            "total_clips_count": len([c for c in discovered_clips.values() if c.get("parent_video_id") == payload.video_id]),
+        }
+
+    # Check if cues for this window already exist
+    all_cues = list(video.get("transcript_cues", []))
+    batch_cues = [c for c in all_cues if start_sec <= float(c.get("start_sec", 0)) < end_sec]
+
+    # If no cues exist for this window and we have a URL, download targeted audio slice
+    if not batch_cues and video.get("url"):
+        temp_audio_out = str(STORAGE_UPLOADS / f"batch_audio_{payload.video_id}_{payload.batch_index}")
+        try:
+            audio_path = IngestionService.download_audio_section(
+                url=video["url"],
+                start_sec=start_sec,
+                end_sec=end_sec,
+                output_path=temp_audio_out,
+            )
+            raw_cues = IngestionService.transcribe_long_media_audio(
+                audio_filepath=audio_path,
+                time_offset_sec=start_sec,
+            )
+            if raw_cues:
+                all_cues.extend(raw_cues)
+                video["transcript_cues"] = all_cues
+                ingested_videos[payload.video_id] = video
+                batch_cues = raw_cues
+            try:
+                Path(audio_path).unlink()
+            except Exception:
+                pass
+        except Exception as e:
+            import logging
+            logging.getLogger("shorts_mvp").error(f"Progressive batch {payload.batch_index} audio error: {e}")
+
+    if not batch_cues:
+        is_last = (payload.batch_index + 1) >= total_batches
+        return {
+            "video_id": payload.video_id,
+            "batch_index": payload.batch_index,
+            "batch_start_sec": start_sec,
+            "batch_end_sec": end_sec,
+            "total_batches": total_batches,
+            "is_last_batch": is_last,
+            "new_clips": [],
+            "total_clips_count": len([c for c in discovered_clips.values() if c.get("parent_video_id") == payload.video_id]),
+        }
+
+    active_profile = ProfileStore.get_active_profile()
+    raw_clips = await SmartClipSelector.discover_clips(
+        cues=batch_cues,
+        video_title=video.get("title", "Source Video"),
+        duration_mode=payload.duration_mode,
+        profile=active_profile,
+    )
+
+    enriched_clips = []
+    for raw_clip in raw_clips:
+        enriched = _enrich_and_store_clip(raw_clip, video, payload)
+        enriched_clips.append(enriched)
+
+    is_last = (payload.batch_index + 1) >= total_batches
+    all_video_clips = [c for c in discovered_clips.values() if c.get("parent_video_id") == payload.video_id]
+
+    return {
+        "video_id": payload.video_id,
+        "batch_index": payload.batch_index,
+        "batch_start_sec": start_sec,
+        "batch_end_sec": end_sec,
+        "total_batches": total_batches,
+        "is_last_batch": is_last,
+        "new_clips": enriched_clips,
+        "total_clips_count": len(all_video_clips),
     }
 
 
@@ -422,13 +573,28 @@ async def render_clip(payload: RenderClipRequest):
         r_start = 0.0
         r_end = clip["duration_sec"]
 
+    # Shortify Master Renderer: Compute face tracking on 45s clip if not already computed
+    crop_info = clip.get("crop_data")
+    if not crop_info and source_path and os.path.exists(source_path):
+        try:
+            crop_info = face_reframer.track_clip_faces(
+                video_filepath=source_path,
+                start_sec=r_start,
+                end_sec=r_end,
+                sample_fps=3.0,
+            )
+            clip["crop_data"] = crop_info
+        except Exception as fe:
+            import logging
+            logging.getLogger("shorts_mvp").warning(f"Face tracking fallback on render: {fe}")
+
     report = await MasterTimelineCompositor.process_and_render_clip(
         source_video_path=source_path,
         start_sec=r_start,
         end_sec=r_end,
         clip_id=payload.clip_id,
         output_dir=str(clip_render_dir),
-        crop_data=clip.get("crop_data"),
+        crop_data=crop_info,
         layout_mode=payload.layout_mode,
         card_type=payload.card_type or clip.get("card_type"),
         background_video_path=bg_video_path,

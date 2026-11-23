@@ -5,6 +5,7 @@ import {
   Sparkles,
   Upload,
   Play,
+  Pause,
   Download,
   Scissors,
   GripVertical,
@@ -240,6 +241,28 @@ export const PersonalShortsStudio: React.FC = () => {
   const [upfrontCardBadge, setUpfrontCardBadge] = useState<string>("CA$ 14.99");
   const [visualStyleConfig, setVisualStyleConfig] = useState<VisualStyleConfig>(DEFAULT_VISUAL_STYLE_CONFIG);
 
+  // Progressive 1-Hour Stream Batching State (Automated Full Coverage for Long Videos)
+  const [progressiveState, setProgressiveState] = useState<{
+    isActive: boolean;
+    isPaused: boolean;
+    currentBatch: number;
+    totalBatches: number;
+    statusMessage: string;
+  }>({
+    isActive: false,
+    isPaused: false,
+    currentBatch: 0,
+    totalBatches: 1,
+    statusMessage: "",
+  });
+  const progressivePauseRef = useRef<boolean>(false);
+  const progressiveRunningRef = useRef<boolean>(false);
+  const progressivePayloadRef = useRef<any>(null);
+
+  // Custom Top-K Virality Filter State
+  const [topKFilter, setTopKFilter] = useState<number | "all">("all");
+  const [customKInput, setCustomKInput] = useState<string>("5");
+
   // Predefined Backgrounds (Directly backed by real video files on disk with rich presets matching Image 8)
   const [backgroundList, setBackgroundList] = useState<BackgroundOption[]>([
     {
@@ -344,6 +367,20 @@ export const PersonalShortsStudio: React.FC = () => {
   const [activeStep, setActiveStep] = useState<string>("");
   const [currentVideo, setCurrentVideo] = useState<any>(null);
   const [clips, setClips] = useState<ClipCandidate[]>([]);
+
+  // Dynamic Top-K Filtered Clips (sorted by virality score)
+  const displayedClips = React.useMemo(() => {
+    if (topKFilter === "all" || clips.length === 0) {
+      return clips;
+    }
+    const k = typeof topKFilter === "number" ? topKFilter : Math.max(1, parseInt(customKInput, 10) || 5);
+    const sorted = [...clips].sort((a, b) => {
+      const scoreA = Number(a.virality_score ?? 0);
+      const scoreB = Number(b.virality_score ?? 0);
+      return scoreB - scoreA;
+    });
+    return sorted.slice(0, k);
+  }, [clips, topKFilter, customKInput]);
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [activeCardTabs, setActiveCardTabs] = useState<Record<string, "transcript" | "viral">>({});
   const [likedClips, setLikedClips] = useState<Record<string, boolean>>({});
@@ -523,6 +560,126 @@ export const PersonalShortsStudio: React.FC = () => {
     }
   };
 
+  // Progressive 1-Hour Stream Batching Controller (Automated Full Coverage)
+  const handlePauseProgressive = () => {
+    progressivePauseRef.current = true;
+    setProgressiveState((prev) => ({
+      ...prev,
+      isPaused: true,
+      statusMessage: "Progressive scan paused",
+    }));
+  };
+
+  const handleResumeProgressive = () => {
+    progressivePauseRef.current = false;
+    setProgressiveState((prev) => ({ ...prev, isPaused: false }));
+    if (!progressiveRunningRef.current && currentVideo?.video_id && progressivePayloadRef.current) {
+      runProgressiveBatches(
+        currentVideo.video_id,
+        progressiveState.currentBatch,
+        progressiveState.totalBatches,
+        progressivePayloadRef.current
+      );
+    }
+  };
+
+  const runProgressiveBatches = async (
+    videoId: string,
+    startBatch: number,
+    totalBatches: number,
+    basePayload: any
+  ) => {
+    if (progressiveRunningRef.current) return;
+    progressiveRunningRef.current = true;
+    progressivePauseRef.current = false;
+    progressivePayloadRef.current = basePayload;
+
+    try {
+      for (let b = startBatch; b < totalBatches; b++) {
+        if (progressivePauseRef.current) {
+          break;
+        }
+
+        setProgressiveState({
+          isActive: true,
+          isPaused: false,
+          currentBatch: b,
+          totalBatches,
+          statusMessage: `Analyzing Hour ${b + 1} of ${totalBatches} in background...`,
+        });
+
+        try {
+          const res = await fetch("http://localhost:8000/api/v1/shorts/progressive-batch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...basePayload,
+              video_id: videoId,
+              batch_index: b,
+              batch_duration_sec: 3600.0,
+            }),
+          });
+
+          if (!res.ok) {
+            console.warn(`Progressive batch ${b} failed: HTTP ${res.status}`);
+            continue;
+          }
+
+          const batchData = await res.json();
+          if (Array.isArray(batchData.new_clips) && batchData.new_clips.length > 0) {
+            const formattedNewClips = batchData.new_clips.map((c: any) => ({
+              ...c,
+              layout_mode: basePayload.layout_mode,
+              card_type: basePayload.card_type,
+              background_id: basePayload.background_id,
+              video_scale_percent: basePayload.video_scale_percent,
+              subtitle_preset: basePayload.subtitle_preset,
+              custom_font_name: basePayload.custom_font_name,
+              custom_active_color: basePayload.custom_active_color,
+              custom_text_color: basePayload.custom_primary_color,
+              custom_animation: basePayload.custom_animation,
+              custom_all_caps: basePayload.custom_all_caps,
+              custom_outline_width: basePayload.custom_outline_width,
+              enable_opening_hook: basePayload.auto_hook,
+              card_vertical_position: basePayload.card_vertical_position,
+              card_width_percent: basePayload.card_width_percent,
+              subtitle_vertical_position: basePayload.subtitle_vertical_position,
+              tts_voice: basePayload.tts_voice,
+              key_hooks: c.key_hooks || ["Bold contrarian claim", "Relatable pain point"],
+              social_author: basePayload.social_author,
+              social_handle: basePayload.social_handle,
+              social_badge: upfrontCardBadge,
+              social_text: basePayload.social_text || (c.opening_hook || c.visual_headline || c.title),
+            }));
+
+            setClips((prev) => {
+              const existingIds = new Set(prev.map((item) => item.clip_id));
+              const fresh = formattedNewClips.filter((item: any) => !existingIds.has(item.clip_id));
+              const updated = [...prev, ...fresh];
+              persistClipsState(updated);
+              return updated;
+            });
+          }
+
+          if (batchData.is_last_batch) {
+            break;
+          }
+        } catch (err) {
+          console.error(`Error in progressive batch ${b}:`, err);
+        }
+      }
+    } finally {
+      progressiveRunningRef.current = false;
+      setProgressiveState((prev) => ({
+        ...prev,
+        isActive: false,
+        statusMessage: progressivePauseRef.current
+          ? "Progressive scan paused"
+          : `Full scan completed across ${totalBatches} hours`,
+      }));
+    }
+  };
+
   // Step 1: Ingest Video and Discover Clips ("Get clips in 1 click")
   const handleGetClips = async () => {
     if (!youtubeUrl && !selectedFile) {
@@ -675,6 +832,34 @@ export const PersonalShortsStudio: React.FC = () => {
               : (c.opening_hook || c.visual_headline || c.title)),
       }));
       persistClipsState(discovered);
+
+      // Progressive 1-Hour Stream Batching for Long Videos (> 1 hour)
+      const totalBatches = discData.total_batches || videoData.total_batches || 1;
+      if (totalBatches > 1) {
+        runProgressiveBatches(videoData.video_id, 1, totalBatches, {
+          duration_mode: durationModeParam,
+          layout_mode: resolvedLayoutMode,
+          card_type: resolvedCardType,
+          background_id: (visualStyleConfig.backgroundPresetId === "minecraft" || ["floating", "card", "card_frame", "blurred", "blurred_bg"].includes(visualStyleConfig.layoutPresetId)) ? "minecraft_parkour" : selectedBgId,
+          video_scale_percent: visualStyleConfig.layoutPresetId === "split_60_40" ? 60 : splitRatio,
+          auto_hook: visualStyleConfig.enableVoiceHook || autoHook,
+          social_author: resolvedCardType === "none" ? undefined : (visualStyleConfig.customCardAuthor || "Peak Heist Clips"),
+          social_handle: resolvedCardType === "none" ? undefined : (visualStyleConfig.customCardHandle || "@peakheistclips"),
+          social_badge: "CA$ 14.99",
+          social_text: hasRealCustomCardText ? visualStyleConfig.customCardText : undefined,
+          card_vertical_position: visualStyleConfig.cardVerticalPosition,
+          card_width_percent: visualStyleConfig.cardWidthPercent,
+          subtitle_vertical_position: visualStyleConfig.subtitleVerticalPosition,
+          subtitle_preset: visualStyleConfig.captionPresetId,
+          custom_font_name: visualStyleConfig.customFontName || "Arial Black",
+          custom_active_color: visualStyleConfig.customActiveColor || "#FFE600",
+          custom_primary_color: visualStyleConfig.customTextColor || "#FFFFFF",
+          custom_animation: visualStyleConfig.customAnimation || "word_pop",
+          custom_all_caps: visualStyleConfig.customAllCaps !== false,
+          custom_outline_width: visualStyleConfig.customOutlineWidth || 5.0,
+          tts_voice: visualStyleConfig.ttsVoice || upfrontVoice,
+        });
+      }
     } catch (err: any) {
       alert(`Error: ${err.message}`);
     } finally {
@@ -1398,6 +1583,124 @@ export const PersonalShortsStudio: React.FC = () => {
                     </div>
                   </div>
 
+                  {/* Progressive 1-Hour Stream Coverage Bar */}
+                  {progressiveState.totalBatches > 1 && (
+                    <div className="p-3.5 rounded-lg border-2 border-primary bg-surface-container flex flex-col gap-2.5 shadow-[3px_3px_0px_#111111]">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            className={`w-3 h-3 rounded-full border border-primary ${
+                              progressiveState.isActive
+                                ? "bg-amber-400 animate-pulse"
+                                : progressiveState.isPaused
+                                ? "bg-zinc-400"
+                                : "bg-emerald-400"
+                            }`}
+                          />
+                          <span className="font-mono font-bold text-xs text-primary uppercase tracking-wider">
+                            Progressive 1-Hour Stream Coverage ({progressiveState.currentBatch + 1} / {progressiveState.totalBatches} Hours)
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {progressiveState.isActive ? (
+                            <button
+                              onClick={handlePauseProgressive}
+                              className="px-2.5 py-1 bg-surface-container-lowest border border-primary text-[11px] font-mono font-bold text-primary hover:bg-amber-100 flex items-center gap-1 shadow-[1px_1px_0px_#111111] cursor-pointer"
+                            >
+                              <Pause className="w-3 h-3" /> Pause Auto-Scan
+                            </button>
+                          ) : (
+                            <button
+                              onClick={handleResumeProgressive}
+                              className="px-2.5 py-1 bg-[#d5eb45] border border-primary text-[11px] font-mono font-bold text-primary hover:bg-[#c4da3f] flex items-center gap-1 shadow-[1px_1px_0px_#111111] cursor-pointer"
+                            >
+                              <Play className="w-3 h-3" /> Resume Background Scan
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="w-full bg-surface-container-lowest h-2.5 border border-primary rounded-full overflow-hidden">
+                        <div
+                          className="bg-[#d5eb45] h-full transition-all duration-500 ease-out"
+                          style={{
+                            width: `${Math.min(
+                              100,
+                              Math.round(((progressiveState.currentBatch + 1) / progressiveState.totalBatches) * 100)
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] font-mono text-secondary">
+                        <span>{progressiveState.statusMessage || `Hour ${progressiveState.currentBatch + 1} of ${progressiveState.totalBatches} processed`}</span>
+                        <span className="font-bold text-primary">{clips.length} total Shorts extracted so far</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Top-K Virality Filter Bar */}
+                  {clips.length > 0 && (
+                    <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border-2 border-primary bg-surface-container shadow-[2px_2px_0px_#111111]">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-primary">
+                          <Flame className="w-4 h-4 text-amber-500 fill-amber-500" />
+                          <span>VIRALITY FILTER:</span>
+                        </div>
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <button
+                            onClick={() => setTopKFilter("all")}
+                            className={`px-2.5 py-1 text-xs font-mono font-bold border border-primary transition-all cursor-pointer ${
+                              topKFilter === "all"
+                                ? "bg-[#d5eb45] text-primary shadow-[1px_1px_0px_#111111]"
+                                : "bg-surface-container-lowest text-secondary hover:bg-surface-container-high"
+                            }`}
+                          >
+                            All ({clips.length})
+                          </button>
+                          {[3, 5, 8, 10, 20].map((k) => (
+                            <button
+                              key={k}
+                              onClick={() => setTopKFilter(k)}
+                              className={`px-2.5 py-1 text-xs font-mono font-bold border border-primary transition-all cursor-pointer ${
+                                topKFilter === k
+                                  ? "bg-[#d5eb45] text-primary shadow-[1px_1px_0px_#111111]"
+                                  : "bg-surface-container-lowest text-secondary hover:bg-surface-container-high"
+                              }`}
+                            >
+                              Top {k}
+                            </button>
+                          ))}
+                          <div className="flex items-center gap-1.5 ml-1 pl-2 border-l border-primary/30">
+                            <span className="text-[11px] font-mono text-secondary">Custom:</span>
+                            <input
+                              type="number"
+                              min="1"
+                              max={Math.max(1, clips.length)}
+                              value={customKInput}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setCustomKInput(val);
+                                const num = parseInt(val, 10);
+                                if (!isNaN(num) && num > 0) {
+                                  setTopKFilter(num);
+                                }
+                              }}
+                              className="w-14 px-1.5 py-0.5 text-xs font-mono font-bold text-center border border-primary bg-surface-container-lowest focus:outline-none focus:ring-1 focus:ring-primary"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 font-mono text-[11px] text-secondary">
+                        {topKFilter !== "all" ? (
+                          <span className="px-2 py-0.5 bg-amber-200 border border-primary text-primary font-bold shadow-[1px_1px_0px_#111111]">
+                            Showing Top {displayedClips.length} of {clips.length} Shorts by Virality Score
+                          </span>
+                        ) : (
+                          <span>Showing all {clips.length} Shorts</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Batch Selection Transparency Banner (Part A) */}
                   {clips.length > 0 && (
                     <div className="p-3.5 rounded-lg border-2 border-primary bg-surface-container flex flex-wrap items-center justify-between gap-3 text-xs shadow-[3px_3px_0px_#111111]">
@@ -1432,7 +1735,7 @@ export const PersonalShortsStudio: React.FC = () => {
 
                 {/* Clip Cards List */}
                 <div className={viewMode === "grid" ? "grid grid-cols-1 md:grid-cols-2 gap-6" : "flex flex-col gap-6"}>
-                  {clips.map((clip) => {
+                  {displayedClips.map((clip) => {
                     const cardTab = activeCardTabs[clip.clip_id] || "transcript";
                     const isLiked = likedClips[clip.clip_id] || false;
 

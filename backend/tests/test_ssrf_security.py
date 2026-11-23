@@ -22,33 +22,35 @@ class TestURLSecurityValidator:
 
     def test_valid_youtube_urls(self):
         """Standard valid YouTube URL formats must be accepted and parsed correctly."""
-        # Standard watch URL
-        url, vid = URLSecurityValidator.validate_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-        assert vid == "dQw4w9WgXcQ"
+        public_ip_addrinfo = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("142.250.190.46", 443))]
+        with patch("socket.getaddrinfo", return_value=public_ip_addrinfo):
+            # Standard watch URL
+            url, vid = URLSecurityValidator.validate_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+            assert vid == "dQw4w9WgXcQ"
 
-        # youtu.be short URL
-        url, vid = URLSecurityValidator.validate_url("https://youtu.be/dQw4w9WgXcQ")
-        assert vid == "dQw4w9WgXcQ"
+            # youtu.be short URL
+            url, vid = URLSecurityValidator.validate_url("https://youtu.be/dQw4w9WgXcQ")
+            assert vid == "dQw4w9WgXcQ"
 
-        # Mobile URL
-        url, vid = URLSecurityValidator.validate_url("https://m.youtube.com/watch?v=dQw4w9WgXcQ")
-        assert vid == "dQw4w9WgXcQ"
+            # Mobile URL
+            url, vid = URLSecurityValidator.validate_url("https://m.youtube.com/watch?v=dQw4w9WgXcQ")
+            assert vid == "dQw4w9WgXcQ"
 
-        # Shorts URL
-        url, vid = URLSecurityValidator.validate_url("https://www.youtube.com/shorts/dQw4w9WgXcQ")
-        assert vid == "dQw4w9WgXcQ"
+            # Shorts URL
+            url, vid = URLSecurityValidator.validate_url("https://www.youtube.com/shorts/dQw4w9WgXcQ")
+            assert vid == "dQw4w9WgXcQ"
 
-        # Embed URL
-        url, vid = URLSecurityValidator.validate_url("https://www.youtube.com/embed/dQw4w9WgXcQ")
-        assert vid == "dQw4w9WgXcQ"
+            # Embed URL
+            url, vid = URLSecurityValidator.validate_url("https://www.youtube.com/embed/dQw4w9WgXcQ")
+            assert vid == "dQw4w9WgXcQ"
 
-        # Live URL
-        url, vid = URLSecurityValidator.validate_url("https://www.youtube.com/live/qSyo5d-dVzA?si=W60Ejo-WJz6uYNob")
-        assert vid == "qSyo5d-dVzA"
+            # Live URL
+            url, vid = URLSecurityValidator.validate_url("https://www.youtube.com/live/qSyo5d-dVzA?si=W60Ejo-WJz6uYNob")
+            assert vid == "qSyo5d-dVzA"
 
-        # Legacy /v/ URL
-        url, vid = URLSecurityValidator.validate_url("https://www.youtube.com/v/dQw4w9WgXcQ")
-        assert vid == "dQw4w9WgXcQ"
+            # Legacy /v/ URL
+            url, vid = URLSecurityValidator.validate_url("https://www.youtube.com/v/dQw4w9WgXcQ")
+            assert vid == "dQw4w9WgXcQ"
 
     def test_disallowed_schemes_rejected(self):
         """file://, ftp://, gopher:// and other non-http(s) schemes must be rejected."""

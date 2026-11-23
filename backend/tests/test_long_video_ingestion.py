@@ -157,3 +157,109 @@ def test_download_clip_section_range_math(tmp_path):
                 dummy_raw.unlink()
             if target_file.exists():
                 target_file.unlink()
+
+
+def test_transcribe_long_media_audio_time_offset():
+    """Verify that time_offset_sec shifts all speech cues accurately to global timeline coordinates."""
+    mock_cues = [
+        {"start_sec": 10.0, "end_sec": 14.5, "text": "First sentence of hour two."},
+        {"start_sec": 20.0, "end_sec": 25.0, "text": "Second sentence of hour two."},
+    ]
+
+    with patch.object(IngestionService, "get_video_duration", return_value=1200.0), \
+         patch.object(IngestionService, "transcribe_media_audio", return_value=mock_cues):
+        
+        offset = 3600.0  # Hour 2 starts at 3600s
+        cues = IngestionService.transcribe_long_media_audio(
+            audio_filepath="dummy_hour_2.m4a",
+            chunk_duration_sec=1800,
+            time_offset_sec=offset,
+        )
+
+        assert len(cues) == 2
+        assert cues[0]["start_sec"] == 3610.0
+        assert cues[0]["end_sec"] == 3614.5
+        assert cues[1]["start_sec"] == 3620.0
+        assert cues[1]["end_sec"] == 3625.0
+
+
+@pytest.mark.anyio
+async def test_progressive_batch_endpoint_flow():
+    """Verify progressive batch endpoint partitions cues and produces candidate batches with total_batches tracking."""
+    from backend.app.api.shorts_mvp_api import progressive_batch, ProgressiveBatchRequest, ingested_videos
+
+    video_id = "test_vid_progressive"
+    ingested_videos[video_id] = {
+        "video_id": video_id,
+        "title": "24-Hour Charity Marathon",
+        "duration_sec": 86400.0,  # 24 hours
+        "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "filepath": "",
+        "is_targeted_ranges": True,
+        "transcript_cues": [
+            # Hour 1 cues
+            {"start_sec": 120.0, "end_sec": 151.0, "text": "Welcome to the start of the 24 hour stream."},
+            {"start_sec": 200.0, "end_sec": 231.0, "text": "We are raising money for a great cause."},
+            # Hour 2 cues
+            {"start_sec": 3700.0, "end_sec": 3731.0, "text": "Entering hour two now, thank you for donations."},
+        ],
+    }
+
+    mock_discovered_batch0 = [
+        {
+            "clip_id": "clip_b0_1",
+            "start_sec": 120.0,
+            "end_sec": 151.0,
+            "duration_sec": 31.0,
+            "spoken_text": "Welcome to the start of the 24 hour stream.",
+            "virality_score": 85,
+        }
+    ]
+
+    mock_discovered_batch1 = [
+        {
+            "clip_id": "clip_b1_1",
+            "start_sec": 3700.0,
+            "end_sec": 3731.0,
+            "duration_sec": 31.0,
+            "spoken_text": "Entering hour two now, thank you for donations.",
+            "virality_score": 92,
+        }
+    ]
+
+    # Batch 0 (Hour 1: 0 - 3600s)
+    req0 = ProgressiveBatchRequest(
+        video_id=video_id,
+        batch_index=0,
+        batch_duration_sec=3600.0,
+    )
+    with patch("backend.app.api.shorts_mvp_api.SmartClipSelector.discover_clips", return_value=mock_discovered_batch0), \
+         patch("backend.app.api.shorts_mvp_api.IngestionService.download_clip_section", return_value="dummy_clip.mp4"), \
+         patch("backend.app.api.shorts_mvp_api.face_reframer.track_clip_faces", return_value=None):
+        res0 = await progressive_batch(req0)
+
+    assert res0["video_id"] == video_id
+    assert res0["batch_index"] == 0
+    assert res0["total_batches"] == 24
+    assert res0["is_last_batch"] is False
+    assert len(res0["new_clips"]) == 1
+    assert res0["new_clips"][0]["clip_id"] == "clip_b0_1"
+
+    # Batch 1 (Hour 2: 3600 - 7200s)
+    req1 = ProgressiveBatchRequest(
+        video_id=video_id,
+        batch_index=1,
+        batch_duration_sec=3600.0,
+    )
+    with patch("backend.app.api.shorts_mvp_api.SmartClipSelector.discover_clips", return_value=mock_discovered_batch1), \
+         patch("backend.app.api.shorts_mvp_api.IngestionService.download_clip_section", return_value="dummy_clip.mp4"), \
+         patch("backend.app.api.shorts_mvp_api.face_reframer.track_clip_faces", return_value=None):
+        res1 = await progressive_batch(req1)
+
+    assert res1["batch_index"] == 1
+    assert res1["total_batches"] == 24
+    assert res1["is_last_batch"] is False
+    assert len(res1["new_clips"]) == 1
+    assert res1["new_clips"][0]["clip_id"] == "clip_b1_1"
+    assert res1["new_clips"][0]["start_sec"] >= 3600.0
+
