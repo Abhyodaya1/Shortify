@@ -26,6 +26,11 @@ YOUTUBE_SCOPES = [
 ]
 
 
+class YouTubeTokenExpiredError(RuntimeError):
+    """Raised when a Google OAuth refresh_token is expired or revoked (invalid_grant)."""
+    pass
+
+
 class YouTubeOAuthService:
     """Manages real YouTube OAuth2 authorization and channel info retrieval."""
 
@@ -94,7 +99,12 @@ class YouTubeOAuthService:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(GOOGLE_TOKEN_URL, data=data)
             if resp.status_code != 200:
-                raise RuntimeError(f"Token refresh failed ({resp.status_code}): {resp.text}")
+                resp_text = resp.text
+                if "invalid_grant" in resp_text:
+                    raise YouTubeTokenExpiredError(
+                        "Google OAuth token has expired or was revoked. Please reconnect your YouTube channel."
+                    )
+                raise RuntimeError(f"Token refresh failed ({resp.status_code}): {resp_text}")
             payload = resp.json()
             return payload["access_token"]
 

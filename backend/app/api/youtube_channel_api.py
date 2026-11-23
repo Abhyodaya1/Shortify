@@ -4,6 +4,7 @@ Provides endpoints for channel connection (Sandbox & OAuth), video import, and s
 
 from __future__ import annotations
 import os
+import logging
 from pathlib import Path
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query
@@ -11,8 +12,9 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from ..services.persistent_scheduler import PersistentScheduler
-from ..services.youtube_oauth_service import YouTubeOAuthService
+from ..services.youtube_oauth_service import YouTubeOAuthService, YouTubeTokenExpiredError
 
+logger = logging.getLogger("youtube_channel_api")
 router = APIRouter(prefix="/api/v1/youtube", tags=["YouTube Integration"])
 
 
@@ -188,8 +190,11 @@ async def get_channel_videos(user_id: str = "default_user"):
             real_videos = await YouTubeOAuthService.fetch_channel_videos(access_token, max_results=10)
             if real_videos:
                 return {"videos": real_videos, "is_live": True}
+        except YouTubeTokenExpiredError as e:
+            logger.warning(f"[YouTube] Access token expired while fetching channel videos: {e}")
+            PersistentScheduler.mark_channel_token_expired(user_id)
         except Exception as e:
-            print(f"[YouTube] Error fetching live channel videos: {e}")
+            logger.error(f"[YouTube] Error fetching live channel videos: {e}")
 
     # Fallback to sample videos when in sandbox or when channel has 0 videos
     return {
@@ -433,6 +438,12 @@ async def publish_now(job_id: str):
     try:
         res = await PersistentScheduler.trigger_publish(job_id)
         return {"status": "success", "result": res}
+    except YouTubeTokenExpiredError as e:
+        logger.warning(f"Failed to publish job {job_id} due to expired token: {e}")
+        raise HTTPException(
+            status_code=401,
+            detail="YouTube authorization has expired or was revoked. Please reconnect your YouTube channel.",
+        )
     except Exception as e:
         logger.error(f"Failed to publish job {job_id}: {e}")
         raise HTTPException(status_code=400, detail=f"Publish failed: {str(e)}")

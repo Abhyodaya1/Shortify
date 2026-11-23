@@ -89,7 +89,12 @@ class BackgroundPublishWorker:
                         self._jobs_processed += 1
                         logger.info(f"[Worker] Job {job_id} published successfully! Video: {res.get('youtube_url')}")
                     except Exception as upload_err:
-                        logger.error(f"[Worker] Job {job_id} upload failed: {upload_err}")
+                        is_token_expired = "invalid_grant" in str(upload_err) or "expired" in str(upload_err).lower()
+                        if is_token_expired:
+                            logger.warning(f"[Worker] Google OAuth session expired for job {job_id}. Pausing live uploads until re-authorized.")
+                            PersistentScheduler.mark_channel_token_expired("default_user")
+                        else:
+                            logger.error(f"[Worker] Job {job_id} upload failed: {upload_err}")
                         PersistentScheduler.record_job_failure(job_id, str(upload_err))
 
             except asyncio.CancelledError:

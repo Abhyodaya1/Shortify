@@ -7,10 +7,12 @@ from __future__ import annotations
 import sqlite3
 import json
 import os
+from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from .token_encryption_service import TokenEncryptionService, TokenDecryptionError
+from .youtube_oauth_service import YouTubeTokenExpiredError
 
 DB_DIR = Path("backend/storage")
 if not DB_DIR.exists():
@@ -23,10 +25,20 @@ class PersistentScheduler:
     """Handles durable scheduling of YouTube Shorts uploads and autopilot rules."""
 
     @classmethod
-    def _get_connection(cls) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(DB_PATH.resolve()))
+    @contextmanager
+    def _get_connection(cls):
+        conn = sqlite3.connect(str(DB_PATH.resolve()), timeout=20.0)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("PRAGMA synchronous=NORMAL;")
+        except Exception:
+            pass
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     @classmethod
     def init_db(cls):
@@ -128,8 +140,26 @@ class PersistentScheduler:
                     res["status"] = "reauth_required"
                     res["refresh_token"] = None
                     res["access_token"] = None
+                    return res
+
+                if not res.get("is_sandbox") and not res.get("refresh_token"):
+                    res["status"] = "reauth_required"
+                else:
+                    res["status"] = "connected"
                 return res
             return None
+
+    @classmethod
+    def mark_channel_token_expired(cls, user_id: str = "default_user") -> None:
+        """Clears stale/revoked OAuth tokens so the UI and worker signal re-authorization."""
+        cls.init_db()
+        with cls._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+            UPDATE connected_channels
+            SET refresh_token = NULL, access_token = NULL
+            WHERE user_id = ?
+            """, (user_id,))
 
     @classmethod
     def connect_sandbox_channel(cls, user_id: str = "default_user") -> Dict[str, Any]:
@@ -377,6 +407,15 @@ class PersistentScheduler:
                     "published_at": now_str,
                     "is_live_youtube": True,
                 }
+            except YouTubeTokenExpiredError as e:
+                cls.mark_channel_token_expired(job.get("user_id", "default_user"))
+                with cls._get_connection() as conn:
+                    conn.cursor().execute("""
+                    UPDATE scheduled_uploads
+                    SET status = 'failed', error_message = ?
+                    WHERE job_id = ?
+                    """, (f"[Auth Expired] {str(e)}", job_id))
+                raise e
             except Exception as e:
                 with cls._get_connection() as conn:
                     conn.cursor().execute("""
@@ -385,6 +424,16 @@ class PersistentScheduler:
                     WHERE job_id = ?
                     """, (str(e), job_id))
                 raise e
+        elif not is_sandbox and not refresh_token:
+            # Real channel configured, but authorization token expired or was revoked
+            err_msg = "YouTube channel authorization has expired or was revoked. Please reconnect your channel."
+            with cls._get_connection() as conn:
+                conn.cursor().execute("""
+                UPDATE scheduled_uploads
+                SET status = 'failed', error_message = ?
+                WHERE job_id = ?
+                """, (f"[Auth Expired] {err_msg}", job_id))
+            raise YouTubeTokenExpiredError(err_msg)
 
         # Fallback to sandbox simulation
         return cls.trigger_mock_publish(job_id)
@@ -452,14 +501,16 @@ class PersistentScheduler:
             current_retries = (row["retry_count"] or 0) if row else 0
             limit = (row["max_retries"] or max_retries) if row else max_retries
 
+            is_auth_error = "invalid_grant" in error_msg or "expired" in error_msg.lower() or "[auth expired]" in error_msg.lower()
             new_retries = current_retries + 1
-            if new_retries >= limit:
-                # Retries exhausted -> mark as permanent failure
+            if is_auth_error or new_retries >= limit:
+                # Retries exhausted or unrecoverable auth failure -> mark as permanent failure
+                prefix = "[Auth Expired]" if is_auth_error else "[Retries Exhausted]"
                 cur.execute("""
                 UPDATE scheduled_uploads
                 SET status = 'failed', retry_count = ?, error_message = ?
                 WHERE job_id = ?
-                """, (new_retries, f"[Retries Exhausted] {error_msg}", job_id))
+                """, (new_retries, f"{prefix} {error_msg}", job_id))
             else:
                 # Requeue for retry
                 cur.execute("""
